@@ -80,7 +80,7 @@ jobs:
           file: ./docker/dockerfile.production
           context: .
           push: true
-          tags: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image_name }}:gh-${{ github.sha }}
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.image_name }}:gh-${{ github.ref_name }}_${{ github.sha }}
           cache-from: type=local,src=./.buildx-cache
           cache-to: type=local,dest=./.buildx-cache-new,mode=max
 
@@ -90,7 +90,7 @@ jobs:
           token: ${{ secrets.INFRA_TOKEN }}
           repository: i40awms/infra
           event-type: post-build
-          client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "gh-${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
+          client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "gh-${{ github.ref_name }}_${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
 
       - name: Move cache
         run: |
