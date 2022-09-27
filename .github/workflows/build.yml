@@ -91,7 +91,9 @@ jobs:
           rm -r ${{ inputs.cache_key }}.zip ||:
           echo '.buildx-cache/' >> .dockerignore
 
-      - run: echo "::set-output name=REF_NAME::${REF_NAME##*/}"
+      - run: |
+          REF_NAME=${REF_NAME##*/}
+          echo "::set-output name=REF_NAME::$REF_NAME"
         id: ref_name
         shell: bash
         env:
@@ -103,7 +105,7 @@ jobs:
           file: ${{ inputs.dockerfile }}
           context: ${{ inputs.context }}
           push: true
-          tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.REF_NAME }}_${{ github.sha }}
+          tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
           cache-from: type=local,src=./.buildx-cache
           cache-to: type=local,dest=./.buildx-cache-new,mode=max
           platforms: ${{ inputs.platforms }}
