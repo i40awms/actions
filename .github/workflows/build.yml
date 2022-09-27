@@ -1,0 +1,140 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Build
+
+# Controls when the workflow will run
+on:
+  workflow_call:
+    inputs:
+      cache_key:
+        description: "Cache key"
+        required: true
+        type: string
+      image_name:
+        description: "Repository short name"
+        required: true
+        type: string
+      in_memory:
+        description: "Use in-memory docker"
+        required: false
+        type: boolean
+        default: true
+      dockerfile:
+        description: "Dockerfile path"
+        required: false
+        type: string
+        default: "./docker/dockerfile.production"
+      context:
+        description: "Build context path"
+        required: false
+        type: string
+        default: "."
+      platforms:
+        description: "Target platforms"
+        required: false
+        type: string
+        default: "linux/amd64,linux/arm64"
+      image_tag:
+        description: "Override image tag"
+        required: false
+        type: string
+      trigger_infra:
+        description: "Trigger CD"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      INFRA_TOKEN:
+        required: true
+      IMG_REGISTRY:
+        required: true
+      IMG_REGION:
+        required: true
+      CACHE_BUCKET:
+        required: true
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: Run Docker on tmpfs
+        uses: JonasAlfredsson/docker-on-tmpfs@v1
+        if: ${{ inputs.in_memory }}
+        with:
+          tmpfs_size: 2
+          swap_size: 4
+          swap_location: "/mnt/swapfile"
+
+      - name: mount current folder in RAM
+        run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
+        if: ${{ inputs.in_memory }}
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+
+      - name: Retrieve cache
+        uses: leroy-merlin-br/action-s3-cache@v1
+        with:
+          action: get
+          aws-region: ${{ secrets.IMG_REGION }}
+          bucket: ${{ secrets.CACHE_BUCKET }}
+          key: "${{ inputs.cache_key }}"
+
+      - name: Delete cache artifact
+        run: |
+          mkdir -p .buildx-cache
+          rm -r ${{ inputs.cache_key }}.zip ||:
+          echo '.buildx-cache/' >> .dockerignore
+
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          file: ${{ inputs.dockerfile }}
+          context: ${{ inputs.context }}
+          push: true
+          tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ github.ref_name }}_${{ github.sha }}
+          cache-from: type=local,src=./.buildx-cache
+          cache-to: type=local,dest=./.buildx-cache-new,mode=max
+          platforms: ${{ inputs.platforms }}
+
+      - name: Build and push other tag
+        uses: docker/build-push-action@v3
+        if: ${{ inputs.image_tag }}
+        with:
+          file: ${{ inputs.dockerfile }}
+          context: ${{ inputs.context }}
+          push: true
+          tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
+          cache-from: type=local,src=./.buildx-cache
+          cache-to: type=local,dest=./.buildx-cache-new,mode=max
+          platforms: ${{ inputs.platforms }}
+
+      - name: Trigger INFRA
+        uses: peter-evans/repository-dispatch@v2
+        if: ${{ inputs.trigger_infra }}
+        with:
+          token: ${{ secrets.INFRA_TOKEN }}
+          repository: i40awms/infra
+          event-type: post-build
+          client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "${{ github.ref_name }}_${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
+
+      - name: Move cache
+        run: |
+          rm -rf .buildx-cache
+          mv .buildx-cache-new .buildx-cache
+
+      - name: Save cache
+        uses: leroy-merlin-br/action-s3-cache@v1
+        with:
+          action: put
+          aws-region: ${{ secrets.IMG_REGION }}
+          bucket: ${{ secrets.CACHE_BUCKET }}
+          s3-class: ONEZONE_IA # It's STANDARD by default. It can be either STANDARD,
+          key: ${{ inputs.cache_key }}
+          artifacts: |
+            .buildx-cache*
