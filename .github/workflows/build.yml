@@ -18,7 +18,7 @@ on:
         description: "Use in-memory docker"
         required: false
         type: boolean
-        default: true
+        default: false
       dockerfile:
         description: "Dockerfile path"
         required: false
