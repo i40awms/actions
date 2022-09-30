@@ -61,7 +61,7 @@ jobs:
     runs-on: [self-hosted, linux]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:
+    run:
       - name: Run Docker on tmpfs
         uses: JonasAlfredsson/docker-on-tmpfs@v1
         if: ${{ inputs.in_memory }}
@@ -73,6 +73,9 @@ jobs:
       - name: mount current folder in RAM
         run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
         if: ${{ inputs.in_memory }}
+
+      - name: Cleare qemu cache
+        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
