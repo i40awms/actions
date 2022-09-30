@@ -47,6 +47,10 @@ on:
         required: false
         type: boolean
         default: false
+      build-args:
+        required: false
+        type: string
+        default: ""
     secrets:
       INFRA_TOKEN:
         required: true
@@ -106,6 +110,7 @@ jobs:
           cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
           platforms: ${{ inputs.platforms }}
+          build-args: ${{ inputs.build-args }}
 
       - name: Build and push other tag
         uses: docker/build-push-action@v3
@@ -118,6 +123,7 @@ jobs:
           cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
           platforms: ${{ inputs.platforms }}
+          build-args: ${{ inputs.build-args }}
 
       - name: Trigger INFRA
         uses: peter-evans/repository-dispatch@v2
