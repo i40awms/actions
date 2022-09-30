@@ -70,38 +70,12 @@ jobs:
           swap_size: 4
           swap_location: "/mnt/swapfile"
 
-      # - name: mount current folder in RAM
-      #   run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
-      #   if: ${{ inputs.in_memory }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-      # - name: Set up Docker Buildx
-      #   uses: docker/setup-buildx-action@v2
-      #   with:
-      #     version: "v0.9.1"
-
-      - name: Cleare qemu cache
-        run: docker buildx create --driver-opt image=moby/buildkit:local --name builder2 --use
-      - name : ar
-        run: docker image ls
+      - name: mount current folder in RAM
+        run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
+        if: ${{ inputs.in_memory }}
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
-
-      # - name: Retrieve cache
-      #   uses: leroy-merlin-br/action-s3-cache@v1
-      #   with:
-      #     action: get
-      #     aws-region: ${{ secrets.IMG_REGION }}
-      #     bucket: ${{ secrets.CACHE_BUCKET }}
-      #     key: "${{ inputs.cache_key }}"
-
-      # - name: Delete cache artifact
-      #   run: |
-      #     mkdir -p .buildx-cache
-      #     rm -r ${{ inputs.cache_key }}.zip ||:
-      #     echo '.buildx-cache/' >> .dockerignore
 
       - run: |
           REF_NAME=${REF_NAME##*/}
@@ -122,14 +96,6 @@ jobs:
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
           platforms: ${{ inputs.platforms }}
 
-  #         --export-cache type=s3,region=eu-west-1,bucket=my_bucket,name=my_image \
-  # --import-cache type=s3,region=eu-west-1,bucket=my_bucket,name=my_image
-
-  #     buildctl build ... \
-  # --output type=image,name=docker.io/username/image,push=true \
-  # --export-cache type=s3,region=eu-west-1,bucket=my_bucket,name=my_image \
-  #--import-cache type=s3,region=eu-west-1,bucket=my_bucket,name=my_image
-
       - name: Build and push other tag
         uses: docker/build-push-action@v3
         if: ${{ inputs.image_tag }}
@@ -138,8 +104,8 @@ jobs:
           context: ${{ inputs.context }}
           push: true
           tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
-          cache-from: type=local,src=./.buildx-cache
-          cache-to: type=local,dest=./.buildx-cache-new,mode=max
+          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
+          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
           platforms: ${{ inputs.platforms }}
 
       - name: Trigger INFRA
@@ -150,19 +116,3 @@ jobs:
           repository: i40awms/infra
           event-type: post-build
           client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "${{ github.ref_name }}_${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
-
-      # - name: Move cache
-      #   run: |
-      #     rm -rf .buildx-cache
-      #     mv .buildx-cache-new .buildx-cache
-
-      # - name: Save cache
-      #   uses: leroy-merlin-br/action-s3-cache@v1
-      #   with:
-      #     action: put
-      #     aws-region: ${{ secrets.IMG_REGION }}
-      #     bucket: ${{ secrets.CACHE_BUCKET }}
-      #     s3-class: ONEZONE_IA # It's STANDARD by default. It can be either STANDARD,
-      #     key: ${{ inputs.cache_key }}
-      #     artifacts: |
-      #       .buildx-cache*
