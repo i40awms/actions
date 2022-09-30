@@ -34,6 +34,12 @@ jobs:
     runs-on: [self-hosted, linux]
 
     steps:
+      - name: mount current folder in RAM
+        run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+
       - name: Build sourcemaps
         uses: docker/build-push-action@v3
         with:
