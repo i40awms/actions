@@ -84,6 +84,11 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+        #  moby/buildkit:local
+      - name: copy buildkit
+        if: ${{ inputs.in_memory }}
+        run: docker save moby/buildkit:local > /tmp/buildkit.tar
+
       - name: Run Docker on tmpfs
         uses: JonasAlfredsson/docker-on-tmpfs@v1
         if: ${{ inputs.in_memory }}
@@ -91,6 +96,10 @@ jobs:
           tmpfs_size: ${{ inputs.in_memory_workdir_size }}
           swap_size: 4
           swap_location: "/mnt/swapfile"
+
+      - name: copy buildkit
+        if: ${{ inputs.in_memory }}
+        run: docker load < /tmp/buildkit.tar
 
       - name: mount current folder in RAM
         run: sudo mount -t tmpfs -o size=${{ inputs.in_memory_workdir_size }}g tmpfs $(pwd)
