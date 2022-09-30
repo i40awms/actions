@@ -88,12 +88,12 @@ jobs:
         uses: JonasAlfredsson/docker-on-tmpfs@v1
         if: ${{ inputs.in_memory }}
         with:
-          tmpfs_size: ${{ in_memory_workdir_size }}
+          tmpfs_size: ${{ inputs.in_memory_workdir_size }}
           swap_size: 4
           swap_location: "/mnt/swapfile"
 
       - name: mount current folder in RAM
-        run: sudo mount -t tmpfs -o size=${{ in_memory_workdir_size }}g tmpfs $(pwd)
+        run: sudo mount -t tmpfs -o size=${{ inputs.in_memory_workdir_size }}g tmpfs $(pwd)
         if: ${{ inputs.in_memory }}
 
       - name: Set up QEMU
