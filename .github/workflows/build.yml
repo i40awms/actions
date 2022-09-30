@@ -61,7 +61,7 @@ jobs:
     runs-on: [self-hosted, linux]
 
     # Steps represent a sequence of tasks that will be executed as part of the job
-    run:
+    steps:
       - name: Run Docker on tmpfs
         uses: JonasAlfredsson/docker-on-tmpfs@v1
         if: ${{ inputs.in_memory }}
