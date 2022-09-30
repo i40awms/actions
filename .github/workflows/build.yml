@@ -82,7 +82,7 @@ jobs:
       #     version: "v0.9.1"
 
       - name: Cleare qemu cache
-        run: docker buildx create --driver-opt image=moby/buildkit:local --name builder --use
+        run: docker buildx create --driver-opt image=moby/buildkit:local --name builder2 --use
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
