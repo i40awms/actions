@@ -20,15 +20,7 @@ on:
         required: false
         type: string
         default: "."
-      build-args:
-        required: false
-        type: string
-        default: ""
     secrets:
-      INFRA_TOKEN:
-        required: true
-      IMG_REGISTRY:
-        required: true
       IMG_REGION:
         required: true
       CACHE_BUCKET:
