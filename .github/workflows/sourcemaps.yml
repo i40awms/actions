@@ -10,15 +10,6 @@ on:
         description: "Cache key"
         required: true
         type: string
-      image_name:
-        description: "Repository short name"
-        required: true
-        type: string
-      in_memory:
-        description: "Use in-memory docker"
-        required: false
-        type: boolean
-        default: false
       dockerfile:
         description: "Dockerfile path"
         required: false
@@ -29,24 +20,6 @@ on:
         required: false
         type: string
         default: "."
-      platforms:
-        description: "Target platforms"
-        required: false
-        type: string
-        default: "linux/amd64,linux/arm64"
-      image_tag:
-        description: "Override image tag"
-        required: false
-        type: string
-      trigger_infra:
-        description: "Trigger CD"
-        required: false
-        type: boolean
-        default: true
-      update_qemu:
-        required: false
-        type: boolean
-        default: false
       build-args:
         required: false
         type: string
