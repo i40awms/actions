@@ -43,6 +43,10 @@ on:
         required: false
         type: boolean
         default: true
+      update_qemu:
+        required: false
+        type: boolean
+        default: false
     secrets:
       INFRA_TOKEN:
         required: true
@@ -73,6 +77,10 @@ jobs:
       - name: mount current folder in RAM
         run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
         if: ${{ inputs.in_memory }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        if: ${{ inputs.update_qemu }}
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
