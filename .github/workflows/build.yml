@@ -152,4 +152,4 @@ jobs:
           token: ${{ secrets.INFRA_TOKEN }}
           repository: i40awms/infra
           event-type: post-build
-          client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "${{ github.ref_name }}_${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
+          client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
