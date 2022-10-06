@@ -114,7 +114,6 @@ jobs:
 
       - run: |
           REF_NAME=${REF_NAME##*/}
-          REF_NAME=${REF_NAME//-/_}
           echo "::set-output name=REF_NAME::$REF_NAME"
         id: ref_name
         shell: bash
