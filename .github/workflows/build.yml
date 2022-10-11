@@ -127,8 +127,8 @@ jobs:
           context: ${{ inputs.context }}
           push: true
           tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
-          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
-          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
+          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }}
+          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }},mode=max
           platforms: ${{ inputs.platforms }}
           build-args: ${{ inputs.build-args }}
 
@@ -140,8 +140,8 @@ jobs:
           context: ${{ inputs.context }}
           push: true
           tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
-          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
-          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
+          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }}
+          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }},mode=max
           platforms: ${{ inputs.platforms }}
           build-args: ${{ inputs.build-args }}
 
