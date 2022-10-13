@@ -71,6 +71,8 @@ on:
         required: true
       CACHE_BUCKET:
         required: true
+      SLACK_WEBHOOK_URL:
+        required: false
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -144,6 +146,17 @@ jobs:
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }},mode=max
           platforms: ${{ inputs.platforms }}
           build-args: ${{ inputs.build-args }}
+
+      - uses: ravsamhq/notify-slack-action@v2
+        if: ${{ secrets.SLACK_WEBHOOK_URL }} != ''
+        with:
+          status: ${{ job.status }}
+          # token: ${{ secrets.GITHUB_TOKEN }}
+          notification_title: "[${{ github.repository }} | ${{ github.ref_name }}] {workflow} has {status_message}"
+          message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}>"
+          footer: "Linked Repo <{repo_url}|{repo}> | <{workflow_url}|View Workflow>"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
       - name: Trigger INFRA
         uses: peter-evans/repository-dispatch@v2
