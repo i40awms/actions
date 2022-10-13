@@ -148,7 +148,7 @@ jobs:
           build-args: ${{ inputs.build-args }}
 
       - uses: ravsamhq/notify-slack-action@v2
-        if: ${{ secrets.SLACK_WEBHOOK_URL }} != ''
+        if: secrets.SLACK_WEBHOOK_URL != ''
         with:
           status: ${{ job.status }}
           # token: ${{ secrets.GITHUB_TOKEN }}
