@@ -147,8 +147,16 @@ jobs:
           platforms: ${{ inputs.platforms }}
           build-args: ${{ inputs.build-args }}
 
+      - name: "check is MY_SECRET exists"
+        env:
+            super_secret: ${{ secrets.MY_SECRET }}
+        if: ${{ env.super_secret == '' }}
+
+      - name: Encode the project the project
+        if: steps.secret.outputs.secret
+
       - uses: ravsamhq/notify-slack-action@v2
-        if: secrets.SLACK_WEBHOOK_URL != ''
+        if: ${{ env.SLACK_WEBHOOK_URL == '' }}
         with:
           status: ${{ job.status }}
           # token: ${{ secrets.GITHUB_TOKEN }}
