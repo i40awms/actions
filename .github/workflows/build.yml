@@ -122,6 +122,9 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
 
+      # ${{ github.event.number == 0 && 'master' ||  format('pr-{0}', github.event.number)  }}
+      # TODO: fare solo build arm se non master
+
       - name: Build and push
         uses: docker/build-push-action@v3
         with:
