@@ -49,7 +49,6 @@ jobs:
           load: true
           tags: sourcemaps
           cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
-          platforms: linux/amd64
           target: source_map
           build-args: |
             CI_COMMIT_SHA: ${{ github.sha }}
