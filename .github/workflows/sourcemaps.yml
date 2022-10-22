@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: "."
+      additional_tag:
+        description: "Build context path"
+        required: false
+        type: string
+        default: ""
     secrets:
       IMG_REGION:
         required: true
@@ -51,7 +56,7 @@ jobs:
           cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
           target: source_map
           build-args: |
-            CI_COMMIT_SHA: ${{ github.sha }}
+            CI_COMMIT_SHA: ${{ github.sha }}${{ inputs.additional_tag }}
 
       - name: Publish sourcemaps
         shell: bash
