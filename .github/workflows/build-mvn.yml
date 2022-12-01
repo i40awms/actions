@@ -136,26 +136,10 @@ jobs:
           cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }}
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }},mode=max
           platforms: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
-          build-args: ${{ inputs.build-args }}
-        env:
-          MVN_USER: ${{ secrets.MVN_USER }}
-          MVN_PASSWORD: ${{ secrets.MVN_PASSWORD }}
-
-      - name: Build and push other tag
-        uses: docker/build-push-action@v3
-        if: ${{ inputs.image_tag }}
-        with:
-          file: ${{ inputs.dockerfile }}
-          context: ${{ inputs.context }}
-          push: true
-          tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
-          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }}
-          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }},mode=max
-          platforms: ${{ inputs.platforms }}
-          build-args: ${{ inputs.build-args }}
-        env:
-          MVN_USER: ${{ secrets.MVN_USER }}
-          MVN_PASSWORD: ${{ secrets.MVN_PASSWORD }}
+          build-args: |
+            ${{ inputs.build-args }}
+            MVN_USER: ${{ secrets.MVN_USER }}
+            MVN_PASSWORD: ${{ secrets.MVN_PASSWORD }}
 
       - uses: ravsamhq/notify-slack-action@v2
         # if: ${{ env.SLACK_WEBHOOK_URL == '' }}
