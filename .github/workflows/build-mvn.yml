@@ -137,9 +137,9 @@ jobs:
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }},mode=max
           platforms: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
           build-args: |
-            ${{ inputs.build-args }}
             MVN_USER=${{ secrets.MVN_USER }}
             MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
+            ${{ inputs.build-args }}
 
       - uses: ravsamhq/notify-slack-action@v2
         # if: ${{ env.SLACK_WEBHOOK_URL == '' }}
