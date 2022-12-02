@@ -139,7 +139,7 @@ jobs:
           build-args: |
             MVN_USER=${{ secrets.MVN_USER }}
             MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
-            NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            NODE_AUTH_TOKEN: ${{ secrets.MVN_PASSWORD }}
             ${{ inputs.build-args }}
 
       - uses: ravsamhq/notify-slack-action@v2
