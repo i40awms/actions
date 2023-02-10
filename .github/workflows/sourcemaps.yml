@@ -58,7 +58,7 @@ jobs:
           cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
           target: source_map
           build-args: |
-            CI_COMMIT_SHA: ${{ github.sha }}${{ inputs.additional_tag }}
+            CI_COMMIT_SHA=${{ github.sha }}${{ inputs.additional_tag }}
 
       - name: Publish sourcemaps
         shell: bash
