@@ -120,7 +120,7 @@ jobs:
 
       - run: |
           REF_NAME=${REF_NAME##*/}
-          echo "::set-output name=REF_NAME::$REF_NAME"
+          echo "REF_NAME=$REF_NAME" >> $GITHUB_OUTPUT
         id: ref_name
         shell: bash
         env:
@@ -133,8 +133,8 @@ jobs:
           context: ${{ inputs.context }}
           push: true
           tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
-          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }}
-          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}_${{ steps.ref_name.outputs.REF_NAME }},mode=max
+          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
+          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
           platforms: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
           build-args: |
             MVN_USER=${{ secrets.MVN_USER }}
