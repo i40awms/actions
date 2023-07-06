@@ -73,6 +73,10 @@ on:
         required: true
       SLACK_WEBHOOK_URL:
         required: false
+    outputs:
+      firstword:
+        description: "The first output string"
+        value: ${{ jobs.build.outputs.image_name }}
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
