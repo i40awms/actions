@@ -74,7 +74,7 @@ on:
       SLACK_WEBHOOK_URL:
         required: false
     outputs:
-      firstword:
+      image_name:
         description: "The first output string"
         value: ${{ jobs.build.outputs.image_name }}
 

@@ -78,7 +78,7 @@ on:
       MVN_PASSWORD:
         required: false
     outputs:
-      firstword:
+      image_name:
         description: "The first output string"
         value: ${{ jobs.build.outputs.image_name }}
 
