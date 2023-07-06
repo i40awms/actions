@@ -86,8 +86,7 @@ jobs:
     runs-on: [self-hosted, linux]
 
     outputs:
-      image_url: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
-
+      image_name: ${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       #  moby/buildkit:local

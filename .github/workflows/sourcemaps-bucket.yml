@@ -6,7 +6,7 @@ name: Deploy sourcemaps to s3
 on:
   workflow_call:
     inputs:
-      image:
+      image_name:
         description: "Cache key"
         required: true
         type: string
@@ -18,6 +18,11 @@ on:
         description: "Cache key"
         required: true
         type: string
+    secrets:
+      IMG_REGISTRY:
+        required: true
+      IMG_REGION:
+        required: true
         
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -33,15 +38,16 @@ jobs:
       - name: Publish sourcemaps
         shell: bash
         env:
-          AWS_REGION: "eu-south-1"
+          AWS_REGION: ${{ secrets.IMG_REGION }}
           BUCKET: "sourcemaps.awms.io"
+          IMAGE: 
         run: |
-          CONT_ID=$(docker create ${{ inputs.image }})
+          CONT_ID=$(docker create ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }})
           TAR=$(mktemp -d)
           docker export $CONT_ID | tar -xC $TAR
           docker rm $CONT_ID
 
-          aws --region $AWS_REGION s3 cp $TAR${{ inputs.maps_path }} s3://$BUCKET/${{ inputs.image }}/${{ github.sha }} --exclude "*" --include "*.js.map" --recursive
+          aws --region $AWS_REGION s3 cp $TAR${{ inputs.maps_path }} s3://$BUCKET/${{ inputs.tag }}/${{ github.sha }} --exclude "*" --include "*.js.map" --recursive
 
           cd
           rm -rf $TAR
