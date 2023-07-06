@@ -1,0 +1,47 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Deploy sourcemaps to s3
+
+# Controls when the workflow will run
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Cache key"
+        required: true
+        type: string
+      tag:
+        description: "Cache key"
+        required: true
+        type: string
+      maps_path:
+        description: "Cache key"
+        required: true
+        type: string
+        
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - name: mount current folder in RAM
+        run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
+
+      - name: Publish sourcemaps
+        shell: bash
+        env:
+          AWS_REGION: "eu-south-1"
+          BUCKET: "sourcemaps.awms.io"
+        run: |
+          CONT_ID=$(docker create ${{ inputs.image }})
+          TAR=$(mktemp -d)
+          docker export $CONT_ID | tar -xC $TAR
+          docker rm $CONT_ID
+
+          aws --region $AWS_REGION s3 cp $TAR${{ inputs.maps_path }} s3://$BUCKET/${{ inputs.image }}/${{ github.sha }} --exclude "*" --include "*.js.map" --recursive
+
+          cd
+          rm -rf $TAR
