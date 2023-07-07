@@ -137,7 +137,7 @@ jobs:
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
           platforms: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
           build-args: ${{ inputs.build-args }}
-          labels: branch=${{ steps.ref_name.outputs.REF_NAME }},sha=${{ github.sha }}
+          labels: branch=${{ steps.ref_name.outputs.REF_NAME }} sha=${{ github.sha }}
 
       - name: Build and push other tag
         uses: docker/build-push-action@v3
@@ -151,7 +151,7 @@ jobs:
           cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
           platforms: ${{ inputs.platforms }}
           build-args: ${{ inputs.build-args }}
-          labels: branch=${{ steps.ref_name.outputs.REF_NAME }},sha=${{ github.sha }}
+          labels: branch=${{ steps.ref_name.outputs.REF_NAME }} sha=${{ github.sha }}
 
       - uses: ravsamhq/notify-slack-action@v2
         # if: ${{ env.SLACK_WEBHOOK_URL == '' }}
