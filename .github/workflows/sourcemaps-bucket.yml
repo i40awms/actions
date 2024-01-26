@@ -47,7 +47,10 @@ jobs:
           docker export $CONT_ID | tar -xC $TAR
           docker rm $CONT_ID
 
-          aws --region $AWS_REGION s3 cp $TAR${{ inputs.maps_path }} s3://$BUCKET/${{ inputs.tag }}/${{ github.sha }} --exclude "*" --include "*.js.map" --recursive --content-type 'application/json' || true
+          aws --region $AWS_REGION s3 cp \
+            --content-type 'application/json' --metadata-directive REPLACE \
+            --exclude "*" --include "*.js.map" --recursive \
+            $TAR${{ inputs.maps_path }} s3://$BUCKET/${{ inputs.tag }}/${{ github.sha }}   || true
 
           cd
           rm -rf $TAR
