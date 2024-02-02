@@ -23,7 +23,7 @@ on:
         required: true
       IMG_REGION:
         required: true
-        
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
@@ -40,7 +40,7 @@ jobs:
         env:
           AWS_REGION: ${{ secrets.IMG_REGION }}
           BUCKET: "sourcemaps.awms.io"
-          IMAGE: 
+          IMAGE:
         run: |
           CONT_ID=$(docker create ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }})
           TAR=$(mktemp -d)
@@ -64,8 +64,8 @@ jobs:
           -F source_map="@$path"
 
           curl https://api.rollbar.com/api/1/sourcemap/download
-            -F access_token=$post_server_item \  
-            -F version=92429d82a41e930486c6de5ebda9602d55c39986 \  
+            -F access_token=$post_server_item \
+            -F version=92429d82a41e930486c6de5ebda9602d55c39986 \
             -F minified_url=https://example.com/static/js/example.min.js
 
           # Use the post_server_time access token, you can
@@ -87,9 +87,7 @@ jobs:
                   -F source_map="@$path"
           done
 
-echo "Completed!"
-
   #         curl https://api.rollbar.com/api/1/sourcemap/download
-  # -F access_token=aaaabbbbccccddddeeeeffff00001111 \  
-  # -F version=92429d82a41e930486c6de5ebda9602d55c39986 \  
+  # -F access_token=aaaabbbbccccddddeeeeffff00001111 \
+  # -F version=92429d82a41e930486c6de5ebda9602d55c39986 \
   # -F minified_url=https://example.com/static/js/example.min.js
