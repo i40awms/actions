@@ -54,3 +54,42 @@ jobs:
 
           cd
           rm -rf $TAR
+
+          find /sourcemaps -name "*.map" -exec sh -c \
+          "sed -i 's/\/\/# sourceMappingURL=/\/\/# sourceMappingURL=https:\/\/sourcemaps.awms.io\/frontend\/$CI_COMMIT_SHA\//g' {}" \;
+          curl --max-time 10 --silent --show-error https://api.rollbar.com/api/1/sourcemap \
+           \
+          -F version=$ROLLBAR_CODE \
+          -F minified_url=http://dynamichost/$url \
+          -F source_map="@$path"
+
+          curl https://api.rollbar.com/api/1/sourcemap/download
+            -F access_token=$post_server_item \  
+            -F version=92429d82a41e930486c6de5ebda9602d55c39986 \  
+            -F minified_url=https://example.com/static/js/example.min.js
+
+          # Use the post_server_time access token, you can
+          # find one in your project access token settings
+          post_server_item=$ROLLBAR_POST_SERVER_ITEM
+
+          echo "Uploading source maps for version $version!"
+
+          # We upload a source map for each resulting JavaScript
+          # file; the path depends on your build config
+          for path in $(find /sourcemaps -name "*.map"); do
+              url=$(basename $path .map)
+              echo "Uploading source map for $url, map "
+
+              curl --max-time 10 --silent --show-error https://api.rollbar.com/api/1/sourcemap \
+                  -F access_token=$post_server_item \
+                  -F version=$ROLLBAR_CODE \
+                  -F minified_url=http://dynamichost/$url \
+                  -F source_map="@$path"
+          done
+
+echo "Completed!"
+
+  #         curl https://api.rollbar.com/api/1/sourcemap/download
+  # -F access_token=aaaabbbbccccddddeeeeffff00001111 \  
+  # -F version=92429d82a41e930486c6de5ebda9602d55c39986 \  
+  # -F minified_url=https://example.com/static/js/example.min.js
