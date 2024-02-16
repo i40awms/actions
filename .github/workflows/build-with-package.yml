@@ -146,16 +146,33 @@ jobs:
             ${{ inputs.build-args }}
           labels: branch=${{ steps.ref_name.outputs.REF_NAME }} sha=${{ github.sha }}
 
-      - uses: ravsamhq/notify-slack-action@v2
-        # if: ${{ env.SLACK_WEBHOOK_URL == '' }}
-        with:
-          status: ${{ job.status }}
-          # token: ${{ secrets.GITHUB_TOKEN }}
-          notification_title: "[${{ github.repository }} | ${{ github.ref_name }}] {workflow} has {status_message}"
-          message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}>"
-          footer: "Linked Repo <{repo_url}|{repo}> | <{workflow_url}|View Workflow>"
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Log build to loki
+        shell: bash
+        run: |
+          epoch_time=$(date +%s)
+          json_payload=$(cat <<EOF
+          {
+            "streams": [
+              {
+                "stream": {
+                  "job": "ci",
+                  "REPOSITORY": "${{ github.repository }}",
+                  "BRANCH": "${{ github.ref_name }}",
+                },
+                "values": [
+                  [
+                    "${epoch_time}000000000",
+                    "${{ github.repository }}:${{ github.ref_name }}:${{ github.sha }} build completed"
+                  ]
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+          
+          # Send POST request
+          curl -X POST -H "Content-Type: application/json" -d "${json_payload}" "http://logging.awms.io:3100/loki/api/v1/push"
 
       - name: Trigger INFRA
         uses: peter-evans/repository-dispatch@v2
