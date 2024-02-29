@@ -143,6 +143,7 @@ jobs:
             MVN_USER=${{ secrets.MVN_USER }}
             MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
             NODE_AUTH_TOKEN=${{ secrets.MVN_PASSWORD }}
+            IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
             ${{ inputs.build-args }}
           labels: branch=${{ steps.ref_name.outputs.REF_NAME }} sha=${{ github.sha }}
 
