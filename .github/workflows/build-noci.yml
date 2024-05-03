@@ -72,7 +72,7 @@ jobs:
         if: ${{ inputs.in_memory }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3.0.0
         if: ${{ inputs.update_qemu }}
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it

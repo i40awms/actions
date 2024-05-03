@@ -112,7 +112,7 @@ jobs:
         if: ${{ inputs.in_memory }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3.0.0
         if: ${{ inputs.update_qemu }}
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
@@ -186,7 +186,7 @@ jobs:
           curl -X POST -H "Content-Type: application/json" -d "${json_payload}" "http://logging.awms.io:3100/loki/api/v1/push"
 
       - name: Trigger INFRA
-        uses: peter-evans/repository-dispatch@v2
+        uses: peter-evans/repository-dispatch@v3.0.0
         if: ${{ inputs.trigger_infra }}
         with:
           token: ${{ secrets.INFRA_TOKEN }}
