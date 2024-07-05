@@ -133,8 +133,8 @@ jobs:
           context: ${{ inputs.context }}
           push: true
           tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
-          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
-          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
+          cache-from: type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}
+          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}
           platforms: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
           labels: branch=${{ steps.ref_name.outputs.REF_NAME }} sha=${{ github.sha }}
           build-args: |
@@ -149,8 +149,8 @@ jobs:
           context: ${{ inputs.context }}
           push: true
           tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
-          cache-from: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }}
-          cache-to: type=s3,region=${{ secrets.IMG_REGION }},bucket=${{ secrets.CACHE_BUCKET }},name=${{ inputs.cache_key }},mode=max
+          cache-from: type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}
+          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}
           platforms: ${{ inputs.platforms }}
           labels: branch=${{ steps.ref_name.outputs.REF_NAME }} sha=${{ github.sha }}
           build-args: |
