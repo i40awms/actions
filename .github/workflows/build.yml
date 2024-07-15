@@ -133,7 +133,7 @@ jobs:
 
       - name: Build Docker image for amd64
         uses: docker/build-push-action@v4
-        if: contains(github.local_platforms, 'linux/amd64')
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/amd64')
         with:
           platforms: linux/amd64
           file: ${{ inputs.dockerfile }}
@@ -154,7 +154,7 @@ jobs:
 
       - name: Build Docker image for ARM
         uses: docker/build-push-action@v4
-        if: contains(github.local_platforms, 'linux/arm64')
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/arm64')
         with:
           platforms: linux/arm64
           file: ${{ inputs.dockerfile }}
@@ -175,7 +175,7 @@ jobs:
 
       - name: Create combined multi-platform image
         run: |
-          platforms="${{ inputs.platforms }}"
+          platforms="${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}"
           tags=""
           for platform in ${platforms//,/ }
           do
