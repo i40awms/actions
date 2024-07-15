@@ -49,6 +49,7 @@ on:
         description: "Override image tag"
         required: false
         type: string
+        default: "latest"
       trigger_infra:
         description: "Trigger CD"
         required: false
