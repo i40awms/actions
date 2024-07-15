@@ -193,7 +193,7 @@ jobs:
           else
             echo "No valid tags found to create a multi-platform image"
             exit 1
-          done
+          fi
 
       - name: Push combined image to Docker Hub
         if: success()
