@@ -179,24 +179,14 @@ jobs:
 
       - name: Create combined multi-platform image
         run: |
-          docker image ls
           platforms="${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}"
           tags=""
           for platform in ${platforms//,/ }
           do
             tag="${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-${platform##*/}"
-            echo $tag
-            docker manifest inspect $tag
-            if docker image ls $tag | grep $ag > /dev/null 2>&1; then
-              tags="$tags $tag"
-            fi
+            tags="$tags $tag"
           done
-          if [ -n "$tags" ]; then
-            docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
-          else
-            echo "No valid tags found to create a multi-platform image"
-            exit 1
-          fi
+          docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
 
       - name: Push combined image to Docker Hub
         if: success()
