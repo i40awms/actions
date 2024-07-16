@@ -142,8 +142,8 @@ jobs:
           platforms: linux/amd64
           file: ${{ inputs.dockerfile }}
           context: ${{ inputs.context }}
-          push: false
-          load: true
+          push: true
+          load: false
           build-args: |
             IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
             ${{ inputs.build-args }}
@@ -163,8 +163,8 @@ jobs:
           platforms: linux/arm64
           file: ${{ inputs.dockerfile }}
           context: ${{ inputs.context }}
-          push: false
-          load: true
+          push: true
+          load: false
           build-args: |
             IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
             ${{ inputs.build-args }}
@@ -188,10 +188,10 @@ jobs:
           done
           docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
 
-      - name: Push combined image to Docker Hub
-        if: success()
-        run: |
-          docker push ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+      # - name: Push combined image to Docker Hub
+      #   if: success()
+      #   run: |
+      #     docker push ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
 
       - name: Log build to loki
         shell: bash
