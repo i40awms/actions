@@ -186,6 +186,7 @@ jobs:
           do
             tag="${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-${platform##*/}"
             echo $tag
+            docker manifest inspect $tag
             if docker manifest inspect $tag > /dev/null 2>&1; then
               tags="$tags $tag"
             fi
