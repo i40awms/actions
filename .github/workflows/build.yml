@@ -200,7 +200,7 @@ jobs:
       - name: Push combined image to Docker Hub
         if: success()
         run: |
-          docker push ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ github.sha }}
+          docker push ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
 
       - name: Log build to loki
         shell: bash
