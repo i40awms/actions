@@ -118,6 +118,14 @@ jobs:
         uses: docker/setup-qemu-action@v3.0.0
         if: ${{ inputs.update_qemu }}
 
+      - run: |
+          REF_NAME=${REF_NAME##*/}
+          echo "LOCAL_PLATFORMS=$PLATFORMS" >> $GITHUB_OUTPUT
+        id: local_platforms
+        shell: bash
+        env:
+          PLATFORMS: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4.1.4
 
@@ -129,24 +137,65 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5.3.0
+      - name: Build Docker image for amd64
+        uses: docker/build-push-action@v4
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/amd64')
         with:
+          platforms: linux/amd64
           file: ${{ inputs.dockerfile }}
           context: ${{ inputs.context }}
           push: true
-          tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
-          cache-from: type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}
-          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}
-          platforms: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
+          load: false
           build-args: |
             MVN_USER=${{ secrets.MVN_USER }}
             MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
             NODE_AUTH_TOKEN=${{ secrets.MVN_PASSWORD }}
             IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
             ${{ inputs.build-args }}
-          labels: branch=${{ steps.ref_name.outputs.REF_NAME }} sha=${{ github.sha }}
+          labels: |
+            branch=${{ steps.ref_name.outputs.REF_NAME }} 
+            sha=${{ github.sha }}
+          tags: |
+            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-amd64
+            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}-amd64
+          cache-from: type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
+          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
 
+      - name: Build Docker image for ARM
+        uses: docker/build-push-action@v4
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/arm64')
+        with:
+          platforms: linux/arm64
+          file: ${{ inputs.dockerfile }}
+          context: ${{ inputs.context }}
+          push: true
+          load: false
+          build-args: |
+            MVN_USER=${{ secrets.MVN_USER }}
+            MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
+            NODE_AUTH_TOKEN=${{ secrets.MVN_PASSWORD }}
+            IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
+            ${{ inputs.build-args }}
+          labels: |
+            branch=${{ steps.ref_name.outputs.REF_NAME }} 
+            sha=${{ github.sha }}
+          tags: |
+            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-arm64
+            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}-arm64
+          cache-from: type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+
+      - name: Create combined multi-platform image
+        run: |
+          platforms="${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}"
+          tags=""
+          for platform in ${platforms//,/ }
+          do
+            tag="${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-${platform##*/}"
+            tags="$tags $tag"
+          done
+          docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
+  
       - name: Log build to loki
         shell: bash
         run: |
