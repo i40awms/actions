@@ -124,7 +124,7 @@ jobs:
         id: local_platforms
         shell: bash
         env:
-          PLATFORMS: ${{ inputs.platforms == '' && ((github.ref_name == 'main') && 'linux/amd64,linux/arm64' ||  'linux/arm64') || inputs.platforms }}
+          PLATFORMS: ${{ inputs.platforms == '' && 'linux/amd64,linux/arm64' || inputs.platforms }}
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4.1.4
