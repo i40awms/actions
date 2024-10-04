@@ -189,7 +189,12 @@ jobs:
             tags="$tags $tag"
           done
           docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
-
+      
+      - name: Create combined multi-platform image
+        if: ${{ inputs.image_tag }}
+        run: |
+          docker tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
+          docker push ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
       - name: Log build to loki
         shell: bash
         run: |
