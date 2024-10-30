@@ -83,7 +83,6 @@ jobs:
       image_tag: ${{ inputs.image_tag }}
       build-args: ${{ inputs.build-args }}
 
-      skip_tag: true
       platform: linux/arm64
 
     secrets:
@@ -102,7 +101,6 @@ jobs:
       image_tag: ${{ inputs.image_tag }}
       build-args: ${{ inputs.build-args }}
 
-      skip_tag: true
       platform: linux/amd64
     secrets:
       IMG_REGISTRY: ${{ secrets.IMG_REGISTRY }}
