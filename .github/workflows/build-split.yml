@@ -1,0 +1,193 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Build
+
+# Controls when the workflow will run
+on:
+  workflow_call:
+    inputs:
+      cache_key:
+        description: "Cache key"
+        required: true
+        type: string
+      image_name:
+        description: "Repository short name"
+        required: true
+        type: string
+      in_memory:
+        description: "Use in-memory docker"
+        required: false
+        type: boolean
+        default: false
+      in_memory_docker_size:
+        description: "Use in-memory docker"
+        required: false
+        type: number
+        default: 2
+      in_memory_workdir_size:
+        description: "Use in-memory docker"
+        required: false
+        type: number
+        default: 1
+
+      dockerfile:
+        description: "Dockerfile path"
+        required: false
+        type: string
+        default: "./docker/dockerfile.production"
+      context:
+        description: "Build context path"
+        required: false
+        type: string
+        default: "."
+      platforms:
+        description: "Target platforms"
+        required: false
+        type: string
+        default: ""
+      image_tag:
+        description: "Override image tag"
+        required: false
+        type: string
+      update_qemu:
+        required: false
+        type: boolean
+        default: false
+      build-args:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      INFRA_TOKEN:
+        required: true
+      IMG_REGISTRY:
+        required: true
+    outputs:
+      image_name:
+        description: "The first output string"
+        value: ${{ jobs.tag.outputs.image_name }}
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+
+  build-arm64:
+    uses: i40awms/actions/.github/workflows/build2.yml@develop
+    with:
+      cache_key: ${{ inputs.cache_key }}
+      image_name: ${{ inputs.image_name }}
+      in_memory: ${{ inputs.in_memory }}
+      in_memory_docker_size: ${{ inputs.in_memory_docker_size }}
+      in_memory_workdir_size: ${{ inputs.in_memory_workdir_size }}
+      dockerfile: ${{ inputs.dockerfile }}
+      context: ${{ inputs.context }}
+      image_tag: ${{ inputs.image_tag }}
+      build-args: ${{ inputs.build-args }}
+
+      skip_tag: true
+      platform: linux/arm64
+
+    secrets:
+      IMG_REGISTRY: ${{ secrets.IMG_REGISTRY }}
+
+  build-amd64:
+    uses: i40awms/actions/.github/workflows/build2.yml@develop
+    with:
+      cache_key: ${{ inputs.cache_key }}
+      image_name: ${{ inputs.image_name }}
+      in_memory: ${{ inputs.in_memory }}
+      in_memory_docker_size: ${{ inputs.in_memory_docker_size }}
+      in_memory_workdir_size: ${{ inputs.in_memory_workdir_size }}
+      dockerfile: ${{ inputs.dockerfile }}
+      context: ${{ inputs.context }}
+      image_tag: ${{ inputs.image_tag }}
+      build-args: ${{ inputs.build-args }}
+
+      skip_tag: true
+      platform: linux/amd64
+    secrets:
+      IMG_REGISTRY: ${{ secrets.IMG_REGISTRY }}
+
+  # This workflow contains a single job called "build"
+  tag:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, ligth]
+    needs:
+      - build-arm64
+      - build-amd64
+
+    outputs:
+      image_name: ${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - run: |
+          REF_NAME=${REF_NAME##*/}
+          echo "REF_NAME=$REF_NAME" >> $GITHUB_OUTPUT
+        id: ref_name
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+
+      - run: |
+          echo "LOCAL_PLATFORMS=$PLATFORMS" >> $GITHUB_OUTPUT
+        id: local_platforms
+        shell: bash
+        env:
+          PLATFORMS: ${{ inputs.platforms == '' && 'linux/amd64,linux/arm64' || inputs.platforms }}
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v4.1.4
+
+      - name: Create combined multi-platform image
+        run: |
+          platforms="${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}"
+          tags=""
+          for platform in ${platforms//,/ }
+          do
+            tag="${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-${platform##*/}"
+            tags="$tags $tag"
+          done
+          docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
+      
+      - name: Tag and push combined image with custom tag
+        if: ${{ inputs.image_tag }}
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }} \
+            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+
+      - name: Log build to loki
+        shell: bash
+        run: |
+          epoch_time=$(date +%s)
+          json_payload=$(cat <<EOF
+          {
+            "streams": [
+              {
+                "stream": {
+                  "job": "ci",
+                  "REPOSITORY": "${{ github.repository }}",
+                  "BRANCH": "${{ github.ref_name }}"
+                },
+                "values": [
+                  [
+                    "${epoch_time}000000000",
+                    "${{ github.repository }}:${{ github.ref_name }}:${{ github.sha }} build completed"
+                  ]
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+          
+          # Send POST request
+          curl -X POST -H "Content-Type: application/json" -d "${json_payload}" "http://logging.awms.io:3100/loki/api/v1/push"
+
+      - name: Trigger INFRA
+        uses: peter-evans/repository-dispatch@v3.0.0
+        with:
+          token: ${{ secrets.INFRA_TOKEN }}
+          repository: i40awms/infra
+          event-type: post-build
+          client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
