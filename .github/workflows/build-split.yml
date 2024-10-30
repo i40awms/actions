@@ -71,7 +71,7 @@ on:
 jobs:
 
   build-arm64:
-    uses: i40awms/actions/.github/workflows/build2.yml@develop
+    uses: i40awms/actions/.github/workflows/build-platform.yml@develop
     with:
       cache_key: ${{ inputs.cache_key }}
       image_name: ${{ inputs.image_name }}
@@ -90,7 +90,7 @@ jobs:
       IMG_REGISTRY: ${{ secrets.IMG_REGISTRY }}
 
   build-amd64:
-    uses: i40awms/actions/.github/workflows/build2.yml@develop
+    uses: i40awms/actions/.github/workflows/build-platform.yml@develop
     with:
       cache_key: ${{ inputs.cache_key }}
       image_name: ${{ inputs.image_name }}
