@@ -57,6 +57,11 @@ on:
         required: false
         type: string
         default: ""
+      trigger_infra:
+        description: "Trigger CD"
+        required: false
+        type: boolean
+        default: true
     secrets:
       INFRA_TOKEN:
         required: true
@@ -184,6 +189,7 @@ jobs:
 
       - name: Trigger INFRA
         uses: peter-evans/repository-dispatch@v3.0.0
+        if: ${{ inputs.trigger_infra }}
         with:
           token: ${{ secrets.INFRA_TOKEN }}
           repository: i40awms/infra
