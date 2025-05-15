@@ -53,6 +53,11 @@ on:
         required: false
         type: string
         default: ""
+      no_cache:
+        description: "No cache"
+        required: false
+        type: boolean
+        default: false
     secrets:
       IMG_REGISTRY:
         required: true
@@ -101,6 +106,7 @@ jobs:
       - name: Build Docker image for ${{ inputs.platform }}
         uses: docker/build-push-action@v5
         with:
+          no-cache: ${{ inputs.no_cache }}
           file: ${{ inputs.dockerfile }}
           context: ${{ inputs.context }}
           push: true

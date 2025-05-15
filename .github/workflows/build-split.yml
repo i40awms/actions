@@ -29,6 +29,11 @@ on:
         required: false
         type: number
         default: 1
+      no_cache:
+        description: "No cache"
+        required: false
+        type: boolean
+        default: false
 
       dockerfile:
         description: "Dockerfile path"
@@ -87,7 +92,7 @@ jobs:
       context: ${{ inputs.context }}
       image_tag: ${{ inputs.image_tag }}
       build-args: ${{ inputs.build-args }}
-
+      no_cache: ${{ inputs.no_cache }}
       platform: arm64
 
     secrets:
@@ -105,7 +110,8 @@ jobs:
       context: ${{ inputs.context }}
       image_tag: ${{ inputs.image_tag }}
       build-args: ${{ inputs.build-args }}
-
+      no_cache: ${{ inputs.no_cache }}
+      
       platform: amd64
     secrets:
       IMG_REGISTRY: ${{ secrets.IMG_REGISTRY }}
