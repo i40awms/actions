@@ -145,7 +145,7 @@ jobs:
           PLATFORMS: ${{ inputs.platforms == '' && 'linux/amd64,linux/arm64' || inputs.platforms }}
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@v6.0.2
 
       - name: Create combined multi-platform image
         run: |
@@ -194,7 +194,7 @@ jobs:
           curl -X POST -H "Content-Type: application/json" -d "${json_payload}" "http://logging.awms.io:3100/loki/api/v1/push"
 
       - name: Trigger INFRA
-        uses: peter-evans/repository-dispatch@v3.0.0
+        uses: peter-evans/repository-dispatch@v4.0.1
         if: ${{ inputs.trigger_infra }}
         with:
           token: ${{ secrets.INFRA_TOKEN }}
