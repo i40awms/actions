@@ -1,0 +1,43 @@
+name: "Check pinned environment"
+description: "Check if a branch is pinned in any infra environment for a given component"
+inputs:
+  branch:
+    description: "Branch to check"
+    required: true
+  infra_token:
+    description: "Token to access infra repo"
+    required: true
+  component:
+    description: "Component key to look up in pinned_env files"
+    required: false
+    default: "backend"
+
+outputs:
+  should_build:
+    description: "true if the branch is pinned in at least one environment"
+    value: ${{ steps.check.outputs.should_build }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check if branch is pinned in any environment
+      id: check
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        INFRA_TOKEN: ${{ inputs.infra_token }}
+        COMPONENT: ${{ inputs.component }}
+      run: |
+        tmpdir=$(mktemp -d)
+        git clone --depth=1 --filter=blob:none --sparse --branch develop \
+          "https://x-access-token:${INFRA_TOKEN}@github.com/i40awms/infra.git" "$tmpdir"
+        cd "$tmpdir"
+        git sparse-checkout set ansible/environments
+        if grep -rl "^${COMPONENT}: ${BRANCH}$" ansible/environments/ 2>/dev/null | grep -q .; then
+          echo "should_build=true" >> $GITHUB_OUTPUT
+          echo "Branch '${BRANCH}' is pinned for component '${COMPONENT}', proceeding with build."
+        else
+          echo "should_build=false" >> $GITHUB_OUTPUT
+          echo "Branch '${BRANCH}' is not pinned in any environment for component '${COMPONENT}', skipping build."
+        fi
+        rm -rf "$tmpdir"
