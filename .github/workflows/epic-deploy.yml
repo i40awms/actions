@@ -1,0 +1,172 @@
+# FF-513 (M5-T4) — Epic CD fast-path (D15/D23).
+#
+# Incremental deploy for the SUBSEQUENT pushes to an epic branch (the first
+# launch goes through infra's `wip-deploy-cycle.yml`, see M5-T5). It pulls the
+# freshly built `<branch>_<sha>` image tag and restarts ONLY the changed stack
+# on the single epic EC2 — no full `wip_deploy_cycle`.
+#
+# Integration contract (infra `trigger.yml` -> `epicDeploy` job):
+#   * Fast-path trigger: repository_dispatch on i40awms/actions, type epic-deploy.
+#   * client_payload: EPIC_KEY, CURRENT_ENV (=epic-<key>), CURRENT_STACK,
+#     PROJECT_REF, IMAGE_REF (=<branch>_<sha>), BRANCH_REF.
+#
+# The epic EC2 is reached by reusing infra's `make deploy-ansible` with
+# CURRENT_ENV=epic-<key>: infra (M5-T3) routes that pseudo-env to the single EC2
+# resolved by tags Environment=epic + Epic=<key>. Image tag scheme matches
+# build-split.yml (`<branch>_<sha>`).
+#
+# Two entrypoints, one job:
+#   * repository_dispatch: [epic-deploy]  -> the primary path infra dispatches.
+#   * workflow_call                       -> reusable (manual re-run / testing).
+# Both feed the same set of fields; payload is read from
+# `github.event.client_payload` (dispatch) or `inputs` (workflow_call).
+
+name: Epic deploy
+
+run-name: >-
+  epic ${{ (github.event.client_payload || inputs).CURRENT_ENV }}::${{ (github.event.client_payload || inputs).CURRENT_STACK }}
+  => ${{ (github.event.client_payload || inputs).IMAGE_REF }}
+
+on:
+  repository_dispatch:
+    types: [epic-deploy]
+
+  workflow_call:
+    inputs:
+      EPIC_KEY:
+        description: "Bare epic key (e.g. FF-513)"
+        required: true
+        type: string
+      CURRENT_ENV:
+        description: "Epic pseudo-env (epic-<key>)"
+        required: true
+        type: string
+      CURRENT_STACK:
+        description: "Stack to restart on the epic EC2"
+        required: true
+        type: string
+      PROJECT_REF:
+        description: "Source project repository (owner/name)"
+        required: true
+        type: string
+      IMAGE_REF:
+        description: "Image tag to deploy (<branch>_<sha>)"
+        required: true
+        type: string
+      BRANCH_REF:
+        description: "Epic branch"
+        required: true
+        type: string
+    secrets:
+      INFRA_TOKEN:
+        description: "Token to checkout the infra repo (private)"
+        required: true
+      AWMS_CI_GPG_USER:
+        required: true
+      AWMS_CI_GPG_VAR:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+
+jobs:
+  epic-deploy:
+    name: >-
+      Restart ${{ (github.event.client_payload || inputs).CURRENT_STACK }}
+      on ${{ (github.event.client_payload || inputs).CURRENT_ENV }}
+    runs-on: [self-hosted, linux, ligth]
+
+    steps:
+      - name: Resolve dispatch payload
+        id: payload
+        env:
+          EPIC_KEY: ${{ (github.event.client_payload || inputs).EPIC_KEY }}
+          CURRENT_ENV: ${{ (github.event.client_payload || inputs).CURRENT_ENV }}
+          CURRENT_STACK: ${{ (github.event.client_payload || inputs).CURRENT_STACK }}
+          PROJECT_REF: ${{ (github.event.client_payload || inputs).PROJECT_REF }}
+          IMAGE_REF: ${{ (github.event.client_payload || inputs).IMAGE_REF }}
+          BRANCH_REF: ${{ (github.event.client_payload || inputs).BRANCH_REF }}
+        run: |
+          set -euo pipefail
+          # Fail fast on a malformed contract rather than deploying to the wrong
+          # target. CURRENT_ENV MUST be the epic pseudo-env (epic-<key>).
+          missing=""
+          for v in EPIC_KEY CURRENT_ENV CURRENT_STACK IMAGE_REF; do
+            if [ -z "${!v:-}" ]; then
+              missing="$missing $v"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required client_payload field(s):$missing"
+            exit 1
+          fi
+          case "$CURRENT_ENV" in
+            epic-*) : ;;
+            *)
+              echo "::error::CURRENT_ENV='$CURRENT_ENV' is not an epic pseudo-env (expected epic-<key>)."
+              exit 1
+              ;;
+          esac
+          {
+            echo "EPIC_KEY=$EPIC_KEY"
+            echo "CURRENT_ENV=$CURRENT_ENV"
+            echo "CURRENT_STACK=$CURRENT_STACK"
+            echo "PROJECT_REF=$PROJECT_REF"
+            echo "IMAGE_REF=$IMAGE_REF"
+            echo "BRANCH_REF=$BRANCH_REF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Epic fast-path: $PROJECT_REF@$BRANCH_REF ($IMAGE_REF) -> ${CURRENT_ENV}::${CURRENT_STACK}"
+
+      # The deploy machinery lives in the infra repo (Makefile + docker compose
+      # `deploy-ansible` service + ansible). Check it out here so we can reuse it
+      # verbatim, exactly like infra's own `.github/actions/deploy`.
+      - name: Checkout infra (deploy machinery)
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: i40awms/infra
+          ref: develop
+          token: ${{ secrets.INFRA_TOKEN }}
+
+      - name: Pull deploy-ansible image
+        shell: bash
+        run: docker compose pull -q deploy-ansible
+
+      # Reuse infra's `make deploy-ansible` with CURRENT_ENV=epic-<key>: infra
+      # (M5-T3) resolves the single epic EC2 by tags (Environment=epic +
+      # Epic=<key>) and restarts ONLY CURRENT_STACK with the pinned IMAGE_REF.
+      - name: Deploy stack to epic EC2
+        id: deploy
+        shell: bash
+        env:
+          CURRENT_ENV: ${{ steps.payload.outputs.CURRENT_ENV }}
+          CURRENT_STACK: ${{ steps.payload.outputs.CURRENT_STACK }}
+          IMAGE_REF: ${{ steps.payload.outputs.IMAGE_REF }}
+          # Mirror infra's deploy action env so make deploy-ansible behaves
+          # identically (GPG verification disabled in CI as upstream does).
+          AWMS_USER_GPG: ${{ secrets.AWMS_CI_GPG_USER }}
+          AWMS_CI_GPG_VAR: ${{ secrets.AWMS_CI_GPG_VAR }}
+          AWMS_CI_GPG: /dev/null
+        run: |
+          set -euo pipefail
+          make deploy-ansible
+
+      # Graceful partial-failure handling: a failed restart of one stack must
+      # surface clearly (and notify) without masking the run result.
+      - name: Notify failure
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          CURRENT_ENV: ${{ steps.payload.outputs.CURRENT_ENV }}
+          CURRENT_STACK: ${{ steps.payload.outputs.CURRENT_STACK }}
+          IMAGE_REF: ${{ steps.payload.outputs.IMAGE_REF }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "No SLACK_WEBHOOK_URL configured; skipping notification."
+            exit 0
+          fi
+          text="Epic deploy FAILED: ${CURRENT_ENV}::${CURRENT_STACK} (${IMAGE_REF}) — ${RUN_URL}"
+          payload=$(printf '{"text":%s}' "$(printf '%s' "$text" | jq -Rs .)")
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d "$payload" "$SLACK_WEBHOOK_URL" || echo "::warning::Slack notification failed"

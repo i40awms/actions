@@ -11,6 +11,24 @@ inputs:
     description: "Component key to look up in pinned_env files"
     required: false
     default: "backend"
+  # --- FF-513 (M5-T6): optional epic-registry path -------------------------
+  # Epic `pinned_env` files are synthesized at detect-time and git-ignored, so
+  # an epic branch is NOT found by the committed-file grep below. When these
+  # inputs are provided, ALSO consult the S3 epic registry (epic-envs/active.json)
+  # and return should_build=true if BRANCH matches an active epic's `branch`.
+  # Backward-compatible: absent/unreachable registry => committed-file grep only.
+  registry_bucket:
+    description: "S3 bucket holding the epic registry (epic-envs/active.json). When empty, the registry check is skipped."
+    required: false
+    default: ""
+  registry_key:
+    description: "S3 key of the epic registry object."
+    required: false
+    default: "epic-envs/active.json"
+  aws_region:
+    description: "AWS region for the registry S3 read (optional)."
+    required: false
+    default: ""
 
 outputs:
   should_build:
@@ -27,17 +45,60 @@ runs:
         BRANCH: ${{ inputs.branch }}
         INFRA_TOKEN: ${{ inputs.infra_token }}
         COMPONENT: ${{ inputs.component }}
+        REGISTRY_BUCKET: ${{ inputs.registry_bucket }}
+        REGISTRY_KEY: ${{ inputs.registry_key }}
+        AWS_REGION: ${{ inputs.aws_region }}
       run: |
+        set -euo pipefail
+
+        emit() {
+          # $1 = true|false, $2 = human message
+          echo "should_build=$1" >> "$GITHUB_OUTPUT"
+          echo "$2"
+        }
+
+        # --- 1) Committed-file grep (unchanged, authoritative legacy path) ----
         tmpdir=$(mktemp -d)
+        # shellcheck disable=SC2064
+        trap "rm -rf '$tmpdir'" EXIT
         git clone --depth=1 --filter=blob:none --sparse --branch develop \
           "https://x-access-token:${INFRA_TOKEN}@github.com/i40awms/infra.git" "$tmpdir"
-        cd "$tmpdir"
-        git sparse-checkout set ansible/environments
-        if grep -rl "^${COMPONENT}: ${BRANCH}$" ansible/environments/ 2>/dev/null | grep -q .; then
-          echo "should_build=true" >> $GITHUB_OUTPUT
-          echo "Branch '${BRANCH}' is pinned for component '${COMPONENT}', proceeding with build."
-        else
-          echo "should_build=false" >> $GITHUB_OUTPUT
-          echo "Branch '${BRANCH}' is not pinned in any environment for component '${COMPONENT}', skipping build."
+        (
+          cd "$tmpdir"
+          git sparse-checkout set ansible/environments
+        )
+        if grep -rl "^${COMPONENT}: ${BRANCH}$" "$tmpdir/ansible/environments/" 2>/dev/null | grep -q .; then
+          emit true "Branch '${BRANCH}' is pinned for component '${COMPONENT}', proceeding with build."
+          exit 0
         fi
-        rm -rf "$tmpdir"
+
+        # --- 2) Optional epic registry (FF-513 M5-T6) ------------------------
+        # Strictly additive: only runs when a bucket is provided AND the AWS CLI
+        # is present. Any failure (no creds, missing object, malformed JSON) is
+        # non-fatal and falls back to the legacy "not pinned" result below.
+        if [ -n "${REGISTRY_BUCKET:-}" ]; then
+          if ! command -v aws >/dev/null 2>&1; then
+            echo "::warning::registry_bucket set but the AWS CLI is unavailable; skipping epic-registry check."
+          else
+            region_args=()
+            if [ -n "${AWS_REGION:-}" ]; then
+              region_args=(--region "$AWS_REGION")
+            fi
+            registry_json=""
+            if registry_json=$(aws s3 cp "${region_args[@]}" \
+                  "s3://${REGISTRY_BUCKET}/${REGISTRY_KEY}" - 2>/dev/null); then
+              # Match BRANCH against any active epic's `branch` field.
+              if printf '%s' "$registry_json" \
+                  | jq -e --arg b "$BRANCH" 'any(.[]?; .branch == $b)' >/dev/null 2>&1; then
+                emit true "Branch '${BRANCH}' matches an active epic in the registry, proceeding with build."
+                exit 0
+              fi
+              echo "Branch '${BRANCH}' did not match any active epic in the registry."
+            else
+              echo "::warning::Could not read epic registry s3://${REGISTRY_BUCKET}/${REGISTRY_KEY}; falling back to committed-file result."
+            fi
+          fi
+        fi
+
+        # --- 3) Default: not pinned anywhere ---------------------------------
+        emit false "Branch '${BRANCH}' is not pinned in any environment for component '${COMPONENT}', skipping build."
