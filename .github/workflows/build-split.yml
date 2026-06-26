@@ -214,6 +214,15 @@ jobs:
     needs:
       - build-arm64
       - build-amd64
+    # Without an explicit `if`, this job defaults to `success()`, which walks the
+    # WHOLE needs graph transitively. When `gate` is skipped (e.g. push on
+    # main/develop/roadmap), that skipped ancestor makes `success()` false and
+    # `tag` is skipped too -> no combined manifest, no INFRA CD trigger. Override
+    # with always() and gate only on the direct build jobs succeeding.
+    if: >-
+      always() &&
+      needs.build-arm64.result == 'success' &&
+      needs.build-amd64.result == 'success'
 
     outputs:
       image_name: ${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
