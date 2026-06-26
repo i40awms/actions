@@ -63,23 +63,22 @@ on:
         type: string
         default: ""
 
-      # --- Branch gating policy (centralized; OPT-IN via gate: true) --------
-      # Default OFF here: build.yml has several consumers that build on every
-      # branch (branches-ignore triggers), so gating must not change their
-      # behaviour silently. When `gate` is true:
+      # --- Branch gating policy (centralized; opt-out via gate: false) ------
+      # When `gate` is true (default):
       #   - main / develop / roadmap/*  -> always build, the `gate` job is
       #     SKIPPED via a cheap job-level `if` (no self-hosted machine).
       #   - sprint* / epic*             -> the `gate` job runs check-pinned and
       #     decides (epic branches are matched via the S3 epic registry).
       #   - any other branch on push    -> gate skipped AND build skipped:
       #     nothing runs.
-      # PRs and manual dispatch always build. With `gate: false` (default) the
-      # gate job is skipped and the build always runs (the pre-gating behaviour).
+      # PRs and manual dispatch always build. With `gate: false` the gate job is
+      # skipped and the build always runs (the pre-gating behaviour) — set it on
+      # consumers that must keep building every branch.
       gate:
-        description: "Apply the branch gating policy (see workflow header). Default false."
+        description: "Apply the branch gating policy (see workflow header)."
         required: false
         type: boolean
-        default: false
+        default: true
       gate_component:
         description: "Component key for the check-pinned lookup. Empty => use image_name."
         required: false
