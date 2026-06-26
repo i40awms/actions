@@ -67,6 +67,42 @@ on:
         required: false
         type: boolean
         default: true
+
+      # --- Branch gating policy (centralized; opt-out via gate: false) -------
+      # When `gate` is true (default):
+      #   - main / develop / roadmap/*  -> always build, the `gate` job is
+      #     SKIPPED via a cheap job-level `if` (no self-hosted machine).
+      #   - sprint* / epic*             -> the `gate` job runs check-pinned and
+      #     decides (epic branches are matched via the S3 epic registry).
+      #   - any other branch on push    -> gate skipped AND build skipped:
+      #     nothing runs.
+      # PRs and manual dispatch always build. With `gate: false` the gate job is
+      # skipped and the build always runs (the pre-gating behaviour).
+      gate:
+        description: "Apply the branch gating policy (see workflow header)."
+        required: false
+        type: boolean
+        default: true
+      gate_component:
+        description: "Component key for the check-pinned lookup. Empty => use image_name."
+        required: false
+        type: string
+        default: ""
+      registry_bucket:
+        description: "S3 bucket holding the epic registry (epic-envs/active.json). Epic envs live in the wip stack."
+        required: false
+        type: string
+        default: "awms-fleets-wip-config"
+      registry_key:
+        description: "S3 key of the epic registry object."
+        required: false
+        type: string
+        default: "epic-envs/active.json"
+      aws_region:
+        description: "AWS region for the epic-registry S3 read."
+        required: false
+        type: string
+        default: "eu-south-1"
     secrets:
       INFRA_TOKEN:
         required: true
@@ -80,7 +116,51 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
 
+  # Gate: decides whether the (expensive) build should run for the gated
+  # branches (sprint* / epic*). The always-build set (main / develop /
+  # roadmap/*) and every non-push event are resolved by the build jobs' own
+  # `if` expression, so this job is SKIPPED for them and no self-hosted machine
+  # is spun up. Any other branch matches neither, so the gate is skipped and
+  # (with no `should_build` output) the build is skipped too. Skipped entirely
+  # when `gate: false`.
+  gate:
+    if: >-
+      inputs.gate &&
+      github.event_name == 'push' &&
+      (
+        startsWith(github.ref_name, 'sprint') ||
+        startsWith(github.ref_name, 'epic')
+      )
+    runs-on: [self-hosted, linux, ligth]
+    outputs:
+      should_build: ${{ steps.pinned.outputs.should_build }}
+    steps:
+      - name: Check if branch is pinned in an infra environment
+        id: pinned
+        uses: i40awms/actions/.github/actions/check-pinned@develop
+        with:
+          branch: ${{ github.ref_name }}
+          component: ${{ inputs.gate_component != '' && inputs.gate_component || inputs.image_name }}
+          infra_token: ${{ secrets.INFRA_TOKEN }}
+          registry_bucket: ${{ inputs.registry_bucket }}
+          registry_key: ${{ inputs.registry_key }}
+          aws_region: ${{ inputs.aws_region }}
+
   build-arm64:
+    needs: gate
+    # Build when gating is off, on any non-push event, for the always-build set
+    # (gate skipped → no machine), or when the gate found the branch pinned.
+    # `always()` lets us run even though `gate` is skipped for those cases.
+    if: >-
+      always() &&
+      (
+        !inputs.gate ||
+        github.event_name != 'push' ||
+        github.ref_name == 'main' ||
+        github.ref_name == 'develop' ||
+        startsWith(github.ref_name, 'roadmap/') ||
+        needs.gate.outputs.should_build == 'true'
+      )
     uses: i40awms/actions/.github/workflows/build-platform.yml@develop
     with:
       cache_key: ${{ inputs.cache_key }}
@@ -99,6 +179,17 @@ jobs:
       IMG_REGISTRY: ${{ secrets.IMG_REGISTRY }}
 
   build-amd64:
+    needs: gate
+    if: >-
+      always() &&
+      (
+        !inputs.gate ||
+        github.event_name != 'push' ||
+        github.ref_name == 'main' ||
+        github.ref_name == 'develop' ||
+        startsWith(github.ref_name, 'roadmap/') ||
+        needs.gate.outputs.should_build == 'true'
+      )
     uses: i40awms/actions/.github/workflows/build-platform.yml@develop
     with:
       cache_key: ${{ inputs.cache_key }}
