@@ -63,6 +63,29 @@ on:
         type: string
         default: ""
 
+      # --- Nx remote build cache (opt-in; no-op when nx_cache_bucket is empty) -
+      # When a bucket is provided, the image build runs `nx build` against an
+      # S3-backed Nx computation cache so unchanged projects are restored instead
+      # of recompiled. Authentication uses the runner's instance-profile role
+      # (IMDS) — no credentials are passed. Leave the bucket empty to keep the
+      # previous behaviour (local cache only). The bucket is a parameter on
+      # purpose — never hardcode it here.
+      nx_cache_bucket:
+        description: "S3 bucket for the Nx remote cache. Empty => remote cache disabled."
+        required: false
+        type: string
+        default: ""
+      nx_cache_prefix:
+        description: "Key prefix inside the bucket. Empty => use image_name."
+        required: false
+        type: string
+        default: ""
+      nx_cache_plugin:
+        description: "npm spec of the Nx S3 remote-cache runner to install at build time."
+        required: false
+        type: string
+        default: "@pellegrims/nx-remotecache-s3"
+
       # --- Branch gating policy (centralized; opt-out via gate: false) -------
       # When `gate` is true (default):
       #   - main / develop / roadmap/*  -> always build, the `gate` job is
@@ -231,14 +254,19 @@ jobs:
             MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
             NODE_AUTH_TOKEN=${{ secrets.MVN_PASSWORD }}
             IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
+            NX_CACHE_BUCKET=${{ inputs.nx_cache_bucket }}
+            NX_CACHE_PREFIX=${{ inputs.nx_cache_prefix != '' && inputs.nx_cache_prefix || inputs.image_name }}
+            NX_CACHE_PLUGIN=${{ inputs.nx_cache_plugin }}
             ${{ inputs.build-args }}
           labels: |
-            branch=${{ steps.ref_name.outputs.REF_NAME }} 
+            branch=${{ steps.ref_name.outputs.REF_NAME }}
             sha=${{ github.sha }}
           tags: |
             ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-arm64
             ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag || format('{0}-{1}-{2}', github.sha, github.run_id, github.run_attempt) }}-arm64
-          cache-from: type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+          cache-from: |
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-arm64
           cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
 
 
@@ -256,9 +284,12 @@ jobs:
             MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
             NODE_AUTH_TOKEN=${{ secrets.MVN_PASSWORD }}
             IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
+            NX_CACHE_BUCKET=${{ inputs.nx_cache_bucket }}
+            NX_CACHE_PREFIX=${{ inputs.nx_cache_prefix != '' && inputs.nx_cache_prefix || inputs.image_name }}
+            NX_CACHE_PLUGIN=${{ inputs.nx_cache_plugin }}
             ${{ inputs.build-args }}
           labels: |
-            branch=${{ steps.ref_name.outputs.REF_NAME }} 
+            branch=${{ steps.ref_name.outputs.REF_NAME }}
             sha=${{ github.sha }}
           tags: |
             ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-amd64
@@ -266,6 +297,8 @@ jobs:
           cache-from: |
             type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
             type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-amd64
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-arm64
           cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
 
       - name: Create combined multi-platform image
