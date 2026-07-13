@@ -76,7 +76,10 @@ on:
       #     decides (epic branches are matched via the S3 epic registry).
       #   - any other branch on push    -> gate skipped AND build skipped:
       #     nothing runs.
-      # PRs and manual dispatch always build. With `gate: false` the gate job is
+      # PRs (pull_request) do NOT build: a branch only builds when it is actually
+      # pinned/deployed somewhere (or is main/develop/roadmap). Non-push,
+      # non-PR events (workflow_dispatch/schedule/repository_dispatch) still
+      # always build as a manual escape hatch. With `gate: false` the gate job is
       # skipped and the build always runs (the pre-gating behaviour).
       gate:
         description: "Apply the branch gating policy (see workflow header)."
@@ -118,11 +121,11 @@ jobs:
 
   # Gate: decides whether the (expensive) build should run for the gated
   # branches (sprint* / epic*). The always-build set (main / develop /
-  # roadmap/*) and every non-push event are resolved by the build jobs' own
-  # `if` expression, so this job is SKIPPED for them and no self-hosted machine
-  # is spun up. Any other branch matches neither, so the gate is skipped and
-  # (with no `should_build` output) the build is skipped too. Skipped entirely
-  # when `gate: false`.
+  # roadmap/*) and non-push, non-PR events (workflow_dispatch/schedule) are
+  # resolved by the build jobs' own `if` expression, so this job is SKIPPED for
+  # them and no self-hosted machine is spun up. Any other branch (incl. PRs)
+  # matches neither, so the gate is skipped and (with no `should_build` output)
+  # the build is skipped too. Skipped entirely when `gate: false`.
   gate:
     if: >-
       inputs.gate &&
@@ -148,14 +151,16 @@ jobs:
 
   build-arm64:
     needs: gate
-    # Build when gating is off, on any non-push event, for the always-build set
-    # (gate skipped → no machine), or when the gate found the branch pinned.
+    # Build when gating is off, on non-push non-PR events (manual/scheduled),
+    # for the always-build set (gate skipped → no machine), or when the gate
+    # found the branch pinned. PRs are intentionally excluded so a branch only
+    # builds when it is actually deployed somewhere.
     # `always()` lets us run even though `gate` is skipped for those cases.
     if: >-
       always() &&
       (
         !inputs.gate ||
-        github.event_name != 'push' ||
+        (github.event_name != 'push' && github.event_name != 'pull_request') ||
         github.ref_name == 'main' ||
         github.ref_name == 'develop' ||
         startsWith(github.ref_name, 'roadmap/') ||
@@ -184,7 +189,7 @@ jobs:
       always() &&
       (
         !inputs.gate ||
-        github.event_name != 'push' ||
+        (github.event_name != 'push' && github.event_name != 'pull_request') ||
         github.ref_name == 'main' ||
         github.ref_name == 'develop' ||
         startsWith(github.ref_name, 'roadmap/') ||
