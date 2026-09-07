@@ -211,12 +211,69 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms == '' && 'linux/amd64,linux/arm64' || inputs.platforms }}
 
+      # I tag dei repository ECR sono IMMUTABILI: ripushare un tag che c'e'
+      # gia' fa fallire il push (rerun di un run, race push/pull_request sullo
+      # stesso commit). Sondiamo quindi esattamente i tag che gli step di build
+      # qui sotto pusherebbero: se il tag identita' <branch>_<sha>-<arch> c'e'
+      # gia', quell'immagine e' per costruzione questo commit e la build di
+      # quella arch si salta. Un errore della sonda (registry irraggiungibile)
+      # vale "non esiste": si ricade nel comportamento di oggi.
+      - name: Probe pushed tags in registry
+        id: probe
+        shell: bash
+        env:
+          IMAGE: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}
+          PRIMARY: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          ALIAS: ${{ inputs.image_tag || format('{0}-{1}-{2}', github.sha, github.run_id, github.run_attempt) }}
+          PLATFORMS: ${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}
+        run: |
+          exists() { docker buildx imagetools inspect "$1" >/dev/null 2>&1; }
+
+          for platform in ${PLATFORMS//,/ }; do
+            arch="${platform##*/}"
+
+            if exists "$IMAGE:$PRIMARY-$arch"; then
+              echo "::notice title=Build $arch saltata::$IMAGE:$PRIMARY-$arch e' gia' nel registry"
+              echo "${arch}_exists=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${arch}_exists=false" >> "$GITHUB_OUTPUT"
+            fi
+
+            # I tag da pushare sono solo quelli che ancora non ci sono: pushare
+            # un tag immutabile gia' presente farebbe fallire l'intero step.
+            tags="$IMAGE:$PRIMARY-$arch"
+            if [ "$ALIAS" != "$PRIMARY" ]; then
+              if exists "$IMAGE:$ALIAS-$arch"; then
+                echo "::warning title=Tag gia' presente::$IMAGE:$ALIAS-$arch esiste gia' e i tag ECR sono immutabili: non verra' aggiornato"
+              else
+                tags="$tags"$'\n'"$IMAGE:$ALIAS-$arch"
+              fi
+            fi
+            {
+              echo "${arch}_tags<<TAGS_EOF"
+              echo "$tags"
+              echo "TAGS_EOF"
+            } >> "$GITHUB_OUTPUT"
+          done
+
+          # Anche il manifest multi-arch e' un tag immutabile.
+          if exists "$IMAGE:$PRIMARY"; then
+            echo "manifest_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "manifest_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$ALIAS" != "$PRIMARY" ] && exists "$IMAGE:$ALIAS"; then
+            echo "alias_manifest_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "alias_manifest_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v6.0.2
 
       - name: Build Docker image for ARM
         uses: docker/build-push-action@v7.1.0
-        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/arm64')
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/arm64') && steps.probe.outputs.arm64_exists != 'true'
         with:
           platforms: linux/arm64
           file: ${{ inputs.dockerfile }}
@@ -229,9 +286,7 @@ jobs:
           labels: |
             branch=${{ steps.ref_name.outputs.REF_NAME }} 
             sha=${{ github.sha }}
-          tags: |
-            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-arm64
-            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag || format('{0}-{1}-{2}', github.sha, github.run_id, github.run_attempt) }}-arm64
+          tags: ${{ steps.probe.outputs.arm64_tags }}
           cache-from: |
             type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
             type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-arm64
@@ -240,7 +295,7 @@ jobs:
 
       - name: Build Docker image for amd64
         uses: docker/build-push-action@v7.1.0
-        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/amd64')
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/amd64') && steps.probe.outputs.amd64_exists != 'true'
         with:
           platforms: linux/amd64
           file: ${{ inputs.dockerfile }}
@@ -253,16 +308,37 @@ jobs:
           labels: |
             branch=${{ steps.ref_name.outputs.REF_NAME }} 
             sha=${{ github.sha }}
-          tags: |
-            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-amd64
-            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag || format('{0}-{1}-{2}', github.sha, github.run_id, github.run_attempt) }}-amd64
+          tags: ${{ steps.probe.outputs.amd64_tags }}
           cache-from: |
             type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
             type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-amd64
             type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
           cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
 
+      # Se una build e' stata saltata, il suo alias (image_tag oppure
+      # <sha>-<run_id>-<attempt>) non e' stato pushato da nessuno: lo si crea
+      # lato registry dal tag identita', senza ricostruire niente.
+      - name: Re-tag existing images (no rebuild)
+        shell: bash
+        env:
+          IMAGE: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}
+          PRIMARY: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          ALIAS: ${{ inputs.image_tag || format('{0}-{1}-{2}', github.sha, github.run_id, github.run_attempt) }}
+          PLATFORMS: ${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}
+        run: |
+          if [ "$ALIAS" = "$PRIMARY" ]; then
+            exit 0
+          fi
+          for platform in ${PLATFORMS//,/ }; do
+            arch="${platform##*/}"
+            if docker buildx imagetools inspect "$IMAGE:$ALIAS-$arch" >/dev/null 2>&1; then
+              continue
+            fi
+            docker buildx imagetools create --tag "$IMAGE:$ALIAS-$arch" "$IMAGE:$PRIMARY-$arch"
+          done
+
       - name: Create combined multi-platform image
+        if: steps.probe.outputs.manifest_exists != 'true'
         run: |
           platforms="${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}"
           tags=""
@@ -274,7 +350,7 @@ jobs:
           docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
       
       - name: Tag and push combined image with custom tag
-        if: ${{ inputs.image_tag }}
+        if: ${{ inputs.image_tag && steps.probe.outputs.alias_manifest_exists != 'true' }}
         run: |
           docker buildx imagetools create \
             --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }} \
