@@ -75,10 +75,27 @@ jobs:
         uses: docker/setup-qemu-action@v4.0.0
         if: ${{ inputs.update_qemu }}
 
+      # I tag dei repository ECR sono IMMUTABILI: ripushare un tag che c'e'
+      # gia' fa fallire il push. Sondiamo esattamente il tag che lo step di
+      # build qui sotto pusherebbe. Un errore della sonda vale "non esiste".
+      - name: Probe pushed tag in registry
+        id: probe
+        shell: bash
+        env:
+          REF: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
+        run: |
+          if docker buildx imagetools inspect "$REF" >/dev/null 2>&1; then
+            echo "::notice title=Build saltata::$REF e' gia' nel registry"
+            echo "image_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v6.0.2
 
       - name: Build and push
+        if: steps.probe.outputs.image_exists != 'true'
         uses: docker/build-push-action@v7.1.0
         with:
           file: ./${{ inputs.subfolder }}/${{ inputs.dockerfile }}

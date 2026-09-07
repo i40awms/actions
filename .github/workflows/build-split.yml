@@ -249,10 +249,39 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms == '' && 'linux/amd64,linux/arm64' || inputs.platforms }}
 
+      # Il manifest multi-arch e l'eventuale custom tag sono anch'essi tag ECR
+      # IMMUTABILI: se ci sono gia' (rerun, race push/pull_request) il
+      # `imagetools create` fallirebbe. Si saltano solo quelli, mentre gli step
+      # a valle (log + Trigger INFRA) girano lo stesso: e' cosi' che un rerun
+      # ripara un dispatch perso invece di morire sul push.
+      - name: Probe pushed tags in registry
+        id: probe
+        shell: bash
+        env:
+          IMAGE: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}
+          PRIMARY: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          ALIAS: ${{ inputs.image_tag }}
+        run: |
+          exists() { docker buildx imagetools inspect "$1" >/dev/null 2>&1; }
+
+          if exists "$IMAGE:$PRIMARY"; then
+            echo "::notice title=Manifest gia' presente::$IMAGE:$PRIMARY e' gia' nel registry"
+            echo "manifest_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "manifest_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$ALIAS" ] && exists "$IMAGE:$ALIAS"; then
+            echo "::warning title=Tag gia' presente::$IMAGE:$ALIAS esiste gia' e i tag ECR sono immutabili: non verra' aggiornato"
+            echo "alias_manifest_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "alias_manifest_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v6.0.2
 
       - name: Create combined multi-platform image
+        if: steps.probe.outputs.manifest_exists != 'true'
         run: |
           platforms="${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}"
           tags=""
@@ -264,7 +293,7 @@ jobs:
           docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
       
       - name: Tag and push combined image with custom tag
-        if: ${{ inputs.image_tag }}
+        if: ${{ inputs.image_tag && steps.probe.outputs.alias_manifest_exists != 'true' }}
         run: |
           docker buildx imagetools create \
             --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }} \
