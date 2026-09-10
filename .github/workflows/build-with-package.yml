@@ -88,8 +88,11 @@ on:
 
       # --- Branch gating policy (centralized; opt-out via gate: false) -------
       # When `gate` is true (default):
-      #   - main / develop / roadmap/*  -> always build, the `gate` job is
-      #     SKIPPED via a cheap job-level `if` (no self-hosted machine).
+      #   - main / develop / eco / roadmap/*  -> always build, the `gate` job
+      #     is SKIPPED via a cheap job-level `if` (no self-hosted machine).
+      #     `eco` is in the set because it is a deploy branch pinned in the
+      #     eco environment (the timesheet stack), like main/develop for the
+      #     others: gating it silently stops its images from ever building.
       #   - sprint* / epic*             -> the `gate` job runs check-pinned and
       #     decides (epic branches are matched via the S3 epic registry).
       #   - any other branch on push    -> gate skipped AND build skipped:
@@ -186,6 +189,7 @@ jobs:
         github.event_name != 'push' ||
         github.ref_name == 'main' ||
         github.ref_name == 'develop' ||
+        github.ref_name == 'eco' ||
         startsWith(github.ref_name, 'roadmap/') ||
         needs.gate.outputs.should_build == 'true'
       )
