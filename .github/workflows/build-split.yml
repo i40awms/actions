@@ -254,18 +254,27 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms == '' && 'linux/amd64,linux/arm64' || inputs.platforms }}
 
-      # Il manifest multi-arch e l'eventuale custom tag sono anch'essi tag ECR
-      # IMMUTABILI: se ci sono gia' (rerun, race push/pull_request) il
-      # `imagetools create` fallirebbe. Si saltano solo quelli, mentre gli step
-      # a valle (log + Trigger INFRA) girano lo stesso: e' cosi' che un rerun
-      # ripara un dispatch perso invece di morire sul push.
+      # Il manifest multi-arch <branch>_<sha> identifica un commit preciso: se
+      # c'e' gia' (rerun, race push/pull_request) non va ricreato, e lo step
+      # viene saltato mentre quelli a valle (log + Trigger INFRA) girano lo
+      # stesso — e' cosi' che un rerun ripara un dispatch perso invece di
+      # morire sul push.
+      #
+      # ADDEV-17689: il tag ALIAS (`latest`) NON rientra in quel ragionamento e
+      # non va mai saltato. Un alias esiste per puntare all'ultima immagine: se
+      # lo si lascia dov'e' perche' "esiste gia'", resta congelato per sempre
+      # sulla prima immagine che l'ha creato. E' successo davvero — `latest` di
+      # terraform-ansible e autocommit-tooling e' rimasto fermo al 02/09 per una
+      # settimana, con warning e job verde, finche' un cambio in
+      # docker/scripts/deploy-ansible.sh non ha rotto ogni deploy CI su dev e
+      # test. La premessa ("i tag ECR sono immutabili") era comunque falsa:
+      # quei repository sono MUTABLE.
       - name: Probe pushed tags in registry
         id: probe
         shell: bash
         env:
           IMAGE: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}
           PRIMARY: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
-          ALIAS: ${{ inputs.image_tag }}
         run: |
           exists() { docker buildx imagetools inspect "$1" >/dev/null 2>&1; }
 
@@ -274,12 +283,6 @@ jobs:
             echo "manifest_exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "manifest_exists=false" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -n "$ALIAS" ] && exists "$IMAGE:$ALIAS"; then
-            echo "::warning title=Tag gia' presente::$IMAGE:$ALIAS esiste gia' e i tag ECR sono immutabili: non verra' aggiornato"
-            echo "alias_manifest_exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "alias_manifest_exists=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
@@ -298,11 +301,22 @@ jobs:
           docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
       
       - name: Tag and push combined image with custom tag
-        if: ${{ inputs.image_tag && steps.probe.outputs.alias_manifest_exists != 'true' }}
+        if: ${{ inputs.image_tag }}
+        shell: bash
+        env:
+          IMAGE: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}
+          ALIAS: ${{ inputs.image_tag }}
+          PRIMARY: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
         run: |
-          docker buildx imagetools create \
-            --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }} \
-            ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          # L'alias si sposta SEMPRE (vedi il commento sul probe). L'unico caso
+          # in cui non si puo' e' un repository con i tag davvero IMMUTABLE: li'
+          # `imagetools create` fallisce e non c'e' niente da fare — si avvisa e
+          # si tira dritto, invece di far fallire la build per un tag.
+          if docker buildx imagetools create --tag "$IMAGE:$ALIAS" "$IMAGE:$PRIMARY"; then
+            echo "::notice title=Alias aggiornato::$IMAGE:$ALIAS -> $PRIMARY"
+          else
+            echo "::warning title=Alias non aggiornato::$IMAGE:$ALIAS non e' stato spostato su $PRIMARY (repository con tag immutabili?): chi pulla :$ALIAS continuera' a prendere l'immagine precedente"
+          fi
 
       - name: Log build to loki
         shell: bash
