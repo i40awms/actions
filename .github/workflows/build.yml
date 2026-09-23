@@ -138,13 +138,19 @@ jobs:
     outputs:
       should_build: ${{ steps.pinned.outputs.should_build }}
     steps:
+      - name: Infra token
+        id: infra_token
+        uses: i40awms/actions/.github/actions/infra-token@develop
+        with:
+          secret: ${{ secrets.INFRA_TOKEN }}
+
       - name: Check if branch is pinned in an infra environment
         id: pinned
         uses: i40awms/actions/.github/actions/check-pinned@develop
         with:
           branch: ${{ github.ref_name }}
           component: ${{ inputs.gate_component != '' && inputs.gate_component || inputs.image_name }}
-          infra_token: ${{ secrets.INFRA_TOKEN }}
+          infra_token: ${{ steps.infra_token.outputs.token }}
           registry_bucket: ${{ inputs.registry_bucket }}
           registry_key: ${{ inputs.registry_key }}
           aws_region: ${{ inputs.aws_region }}
@@ -388,11 +394,26 @@ jobs:
           # Send POST request
           curl -X POST -H "Content-Type: application/json" -d "${json_payload}" "http://logging.awms.io:3100/loki/api/v1/push"
 
-      - name: Trigger INFRA
-        uses: peter-evans/repository-dispatch@v4.0.1
+      - name: Infra token (dispatch)
+        id: infra_token_dispatch
         if: ${{ inputs.trigger_infra }}
+        uses: i40awms/actions/.github/actions/infra-token@develop
         with:
-          token: ${{ secrets.INFRA_TOKEN }}
-          repository: i40awms/infra
-          event-type: post-build
-          client-payload: '{"PROJECT_REF": "${{ github.repository }}", "IMAGE_REF": "${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}", "BRANCH_REF" : "${{ github.ref_name }}"}'
+          secret: ${{ secrets.INFRA_TOKEN }}
+
+      # workflow_dispatch, non repository_dispatch: basta Actions write su infra,
+      # mentre repository_dispatch vorrebbe Contents write su un develop non protetto.
+      - name: Trigger INFRA
+        if: ${{ inputs.trigger_infra }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.infra_token_dispatch.outputs.token }}
+          PROJECT_REF: ${{ github.repository }}
+          IMAGE_REF: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          BRANCH_REF: ${{ github.ref_name }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/i40awms/infra/actions/workflows/trigger.yml/dispatches \
+            -d "{\"ref\":\"develop\",\"inputs\":{\"PROJECT_REF\":\"${PROJECT_REF}\",\"IMAGE_REF\":\"${IMAGE_REF}\",\"BRANCH_REF\":\"${BRANCH_REF}\"}}"
