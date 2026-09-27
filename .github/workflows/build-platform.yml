@@ -142,6 +142,8 @@ jobs:
       - name: Build Docker image for ${{ inputs.platform }}
         if: steps.probe.outputs.image_exists != 'true'
         uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           no-cache: ${{ inputs.no_cache }}
           file: ${{ inputs.dockerfile }}

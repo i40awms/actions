@@ -97,6 +97,8 @@ jobs:
       - name: Build and push
         if: steps.probe.outputs.image_exists != 'true'
         uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           file: ./${{ inputs.subfolder }}/${{ inputs.dockerfile }}
           context: ${{ inputs.subfolder }}

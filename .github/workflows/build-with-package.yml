@@ -309,6 +309,8 @@ jobs:
 
       - name: Build Docker image for ARM
         uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/arm64') && steps.probe.outputs.arm64_exists != 'true'
         with:
           platforms: linux/arm64
@@ -337,6 +339,8 @@ jobs:
 
       - name: Build Docker image for amd64
         uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/amd64') && steps.probe.outputs.amd64_exists != 'true'
         with:
           platforms: linux/amd64

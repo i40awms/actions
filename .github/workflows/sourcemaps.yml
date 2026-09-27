@@ -49,6 +49,8 @@ jobs:
 
       - name: Build sourcemaps
         uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           file: ${{ inputs.dockerfile }}
           context: ${{ inputs.context }}
