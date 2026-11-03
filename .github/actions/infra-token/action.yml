@@ -1,0 +1,30 @@
+name: "Infra token"
+description: "Token per leggere i40awms/infra e avviarne le workflow: conia un token dell'App awms-build-trigger se il secret è la sua chiave privata, altrimenti usa il secret com'è"
+inputs:
+  secret:
+    description: "Valore di secrets.INFRA_TOKEN: chiave privata PEM dell'App, oppure un token già pronto"
+    required: true
+outputs:
+  token:
+    description: "Token da usare verso i40awms/infra"
+    value: ${{ steps.app.outputs.token || inputs.secret }}
+runs:
+  using: "composite"
+  steps:
+    - name: Detect secret kind
+      id: kind
+      shell: bash
+      env:
+        SECRET: ${{ inputs.secret }}
+      run: |
+        if [[ "$SECRET" == -----BEGIN* ]]; then echo "app=true" >> "$GITHUB_OUTPUT"; else echo "app=false" >> "$GITHUB_OUTPUT"; fi
+
+    - name: Mint awms-build-trigger token
+      id: app
+      if: steps.kind.outputs.app == 'true'
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: "5043028"
+        private-key: ${{ inputs.secret }}
+        owner: i40awms
+        repositories: infra

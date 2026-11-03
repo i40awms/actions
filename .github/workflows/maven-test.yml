@@ -1,0 +1,129 @@
+# Workflow riusabile: `mvn test` su PR per le repo Maven (FF-1511).
+# Volutamente NON `verify`: nei pom delle repo spring-boot:start (pre-integration-test)
+# e springdoc:generate avviano l'app, che in CI non ha DB/INFRA_ENV.
+# Il caller passa MVN_USER/MVN_PASSWORD solo se la repo scarica pacchetti da GitHub Packages.
+
+name: Maven test
+
+on:
+  workflow_call:
+    inputs:
+      java_version:
+        description: "JDK (temurin)"
+        required: false
+        type: string
+        default: "17"
+      working_directory:
+        description: "Cartella del pom.xml"
+        required: false
+        type: string
+        default: "."
+      maven_args:
+        description: "Argomenti extra per mvn separati da spazio, senza virgolette, es. -Dtest=!BackendApplicationTests -Dsurefire.failIfNoSpecifiedTests=false"
+        required: false
+        type: string
+        default: ""
+      testcontainers_hub_prefix:
+        description: "Prefisso registry per le immagini Docker Hub di Testcontainers (es. mirror ECR, con slash finale). Vuoto = Docker Hub"
+        required: false
+        type: string
+        default: ""
+      timeout_minutes:
+        required: false
+        type: number
+        default: 30
+    secrets:
+      MVN_USER:
+        description: "Utente per GitHub Packages (server-id github)"
+        required: false
+      MVN_PASSWORD:
+        description: "Token per GitHub Packages (server-id github)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # heavy: stesso label dei job che fanno docker build/push (build-with-package.yml), quindi ha Docker per Testcontainers;
+    # amd64: i label della flotta amd sono "heavy,amd64" (infra runners_amd.tf)
+    runs-on: [self-hosted, linux, heavy, amd64]
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+          cache: maven
+          # settings.xml con <server id="github"> (id del <repository> nei pom); le credenziali sono `${env.*}`, valorizzate solo nello step Test
+          server-id: github
+          server-username: MVN_USERNAME
+          server-password: MVN_TOKEN
+
+      - name: Wrapper Maven
+        id: wrapper
+        run: echo "present=$([ -x ./mvnw ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # Le repo senza mvnw (sdk-java) usano mvn: stessa versione che il loro build.yaml installa
+      - name: Set up Maven
+        if: ${{ steps.wrapper.outputs.present != 'true' }}
+        uses: stCarolas/setup-maven@v4.5
+        with:
+          maven-version: 3.8.7
+
+      - name: Docker disponibile (Testcontainers)
+        run: |
+          docker info --format '{{.ServerVersion}} {{.Architecture}}' || echo "::warning::docker non disponibile sul runner, i test Testcontainers falliranno"
+
+      - name: Mirror immagini Testcontainers
+        if: ${{ inputs.testcontainers_hub_prefix != '' }}
+        env:
+          HUB_PREFIX: ${{ inputs.testcontainers_hub_prefix }}
+        run: echo "TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX=$HUB_PREFIX" >> "$GITHUB_ENV"
+
+      - name: Test
+        id: test
+        env:
+          MVN_USERNAME: ${{ secrets.MVN_USER }}
+          MVN_TOKEN: ${{ secrets.MVN_PASSWORD }}
+          MAVEN_ARGS_INPUT: ${{ inputs.maven_args }}
+          WRAPPER_PRESENT: ${{ steps.wrapper.outputs.present }}
+        run: |
+          if [ "$WRAPPER_PRESENT" = true ]; then MVN=./mvnw; else MVN=mvn; fi
+          read -ra ARGS <<< "$MAVEN_ARGS_INPUT"
+          "$MVN" -B -ntp test "${ARGS[@]}"
+
+      - name: Riepilogo test
+        if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.test.outcome }}
+        run: |
+          shopt -s nullglob
+          files=(target/surefire-reports/*.txt)
+          {
+            echo "### Test Maven"
+            if [ ${#files[@]} -gt 0 ]; then
+              grep -h "^Tests run:" "${files[@]}" | awk -F'[:,]' '{t+=$2;f+=$4;e+=$6;s+=$8} END{printf "Test: %d, failure: %d, error: %d, skipped: %d\n",t,f,e,s}' || true
+              grep -lE "<<< (FAILURE|ERROR)!" "${files[@]}" | sed 's#.*/##; s#\.txt$##; s#^#- #' || true
+            elif [ "$TEST_OUTCOME" = success ]; then
+              echo "0 test eseguiti (build OK)."
+            else
+              echo "Nessun report surefire: build fallita prima dei test."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report surefire
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: surefire-reports
+          path: ${{ inputs.working_directory }}/target/surefire-reports
+          retention-days: 7
+          if-no-files-found: ignore

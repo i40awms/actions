@@ -1,0 +1,6 @@
+{
+    "yaml.schemas": {
+        "file:///home/fpizzo/.vscode-server/extensions/atlassian.atlascode-2.8.5/resources/schemas/pipelines-schema.json": "bitbucket-pipelines.yml",
+        "https://json.schemastore.org/github-action.json": "file:///home/fpizzo/awms-actions/.github/actions/buid.yml"
+    }
+}
