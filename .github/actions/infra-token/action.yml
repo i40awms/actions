@@ -22,7 +22,7 @@ runs:
     - name: Mint awms-build-trigger token
       id: app
       if: steps.kind.outputs.app == 'true'
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@v3.3.0
       with:
         app-id: "5043028"
         private-key: ${{ inputs.secret }}
