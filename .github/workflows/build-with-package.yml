@@ -1,0 +1,455 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Build with maven support
+
+# Controls when the workflow will run
+on:
+  workflow_call:
+    inputs:
+      cache_key:
+        description: "Cache key"
+        required: true
+        type: string
+      image_name:
+        description: "Repository short name"
+        required: true
+        type: string
+      in_memory:
+        description: "Use in-memory docker"
+        required: false
+        type: boolean
+        default: false
+      in_memory_docker_size:
+        description: "Use in-memory docker"
+        required: false
+        type: number
+        default: 2
+      in_memory_workdir_size:
+        description: "Use in-memory docker"
+        required: false
+        type: number
+        default: 1
+
+      dockerfile:
+        description: "Dockerfile path"
+        required: false
+        type: string
+        default: "./docker/dockerfile.production"
+      context:
+        description: "Build context path"
+        required: false
+        type: string
+        default: "."
+      platforms:
+        description: "Target platforms"
+        required: false
+        type: string
+        default: ""
+      image_tag:
+        description: "Override image tag"
+        required: false
+        type: string
+      trigger_infra:
+        description: "Trigger CD"
+        required: false
+        type: boolean
+        default: true
+      update_qemu:
+        required: false
+        type: boolean
+        default: false
+      build-args:
+        required: false
+        type: string
+        default: ""
+
+      # --- Nx remote build cache (opt-in; no-op when nx_cache_bucket is empty) -
+      # When a bucket is provided, the image build runs `nx build` against an
+      # S3-backed Nx computation cache so unchanged projects are restored instead
+      # of recompiled. Authentication uses the runner's instance-profile role
+      # (IMDS) — no credentials are passed. Leave the bucket empty to keep the
+      # previous behaviour (local cache only). The bucket is a parameter on
+      # purpose — never hardcode it here.
+      nx_cache_bucket:
+        description: "S3 bucket for the Nx remote cache. Empty => remote cache disabled."
+        required: false
+        type: string
+        default: ""
+      nx_cache_prefix:
+        description: "Key prefix inside the bucket. Empty => use image_name."
+        required: false
+        type: string
+        default: ""
+      nx_cache_plugin:
+        description: "npm spec of the Nx S3 remote-cache runner to install at build time."
+        required: false
+        type: string
+        default: "@pellegrims/nx-remotecache-s3"
+
+      # --- Branch gating policy (centralized; opt-out via gate: false) -------
+      # When `gate` is true (default):
+      #   - main / develop / eco / roadmap/*  -> always build, the `gate` job
+      #     is SKIPPED via a cheap job-level `if` (no self-hosted machine).
+      #     `eco` is in the set because it is a deploy branch pinned in the
+      #     eco environment (the timesheet stack), like main/develop for the
+      #     others: gating it silently stops its images from ever building.
+      #   - sprint* / epic*             -> the `gate` job runs check-pinned and
+      #     decides (epic branches are matched via the S3 epic registry).
+      #   - any other branch on push    -> gate skipped AND build skipped:
+      #     nothing runs.
+      # PRs and manual dispatch always build. With `gate: false` the gate job is
+      # skipped and the build always runs (the pre-gating behaviour).
+      gate:
+        description: "Apply the branch gating policy (see workflow header)."
+        required: false
+        type: boolean
+        default: true
+      gate_component:
+        description: "Component key for the check-pinned lookup. Empty => use image_name."
+        required: false
+        type: string
+        default: ""
+      registry_bucket:
+        description: "S3 bucket holding the epic registry (epic-envs/active.json). Epic envs live in the wip stack."
+        required: false
+        type: string
+        default: "awms-fleets-wip-config"
+      registry_key:
+        description: "S3 key of the epic registry object."
+        required: false
+        type: string
+        default: "epic-envs/active.json"
+      aws_region:
+        description: "AWS region for the epic-registry S3 read."
+        required: false
+        type: string
+        default: "eu-south-1"
+    secrets:
+      INFRA_TOKEN:
+        required: true
+      IMG_REGISTRY:
+        required: true
+      IMG_REGION:
+        required: true
+      CACHE_BUCKET:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+      MVN_USER:
+        required: false
+      MVN_PASSWORD:
+        required: false
+    outputs:
+      image_name:
+        description: "The first output string"
+        value: ${{ jobs.build.outputs.image_name }}
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # Gate: decides whether the (expensive) build should run for the gated
+  # branches (sprint* / epic*). The always-build set (main / develop /
+  # roadmap/*) and every non-push event are resolved by the build job's own
+  # `if` expression, so this job is SKIPPED for them and no self-hosted machine
+  # is spun up. Any other branch matches neither, so the gate is skipped and
+  # (with no `should_build` output) the build is skipped too. Skipped entirely
+  # when `gate: false`.
+  gate:
+    if: >-
+      inputs.gate &&
+      github.event_name == 'push' &&
+      (
+        startsWith(github.ref_name, 'sprint') ||
+        startsWith(github.ref_name, 'epic')
+      )
+    runs-on: [self-hosted, linux, ligth]
+    outputs:
+      should_build: ${{ steps.pinned.outputs.should_build }}
+    steps:
+      - name: Infra token
+        id: infra_token
+        uses: i40awms/actions/.github/actions/infra-token@develop
+        with:
+          secret: ${{ secrets.INFRA_TOKEN }}
+
+      - name: Check if branch is pinned in an infra environment
+        id: pinned
+        uses: i40awms/actions/.github/actions/check-pinned@develop
+        with:
+          branch: ${{ github.ref_name }}
+          component: ${{ inputs.gate_component != '' && inputs.gate_component || inputs.image_name }}
+          infra_token: ${{ steps.infra_token.outputs.token }}
+          registry_bucket: ${{ inputs.registry_bucket }}
+          registry_key: ${{ inputs.registry_key }}
+          aws_region: ${{ inputs.aws_region }}
+
+  # This workflow contains a single job called "build"
+  build:
+    needs: gate
+    # Build when gating is off, on any non-push event, for the always-build set
+    # (gate skipped → no machine), or when the gate found the branch pinned.
+    # `always()` lets us run even though `gate` is skipped for those cases.
+    if: >-
+      always() &&
+      (
+        !inputs.gate ||
+        github.event_name != 'push' ||
+        github.ref_name == 'main' ||
+        github.ref_name == 'develop' ||
+        github.ref_name == 'eco' ||
+        startsWith(github.ref_name, 'roadmap/') ||
+        needs.gate.outputs.should_build == 'true'
+      )
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux, heavy]
+
+    outputs:
+      image_name: ${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      #  moby/buildkit:local
+      - name: copy buildkit
+        if: ${{ inputs.in_memory }}
+        run: docker save moby/buildkit:local > /tmp/buildkit.tar
+
+      - name: Run Docker on tmpfs
+        uses: JonasAlfredsson/docker-on-tmpfs@v1
+        if: ${{ inputs.in_memory }}
+        with:
+          tmpfs_size: ${{ inputs.in_memory_workdir_size }}
+          swap_size: 4
+          swap_location: "/mnt/swapfile"
+
+      - name: copy buildkit
+        if: ${{ inputs.in_memory }}
+        run: docker load < /tmp/buildkit.tar
+
+      - name: mount current folder in RAM
+        run: sudo mount -t tmpfs -o size=${{ inputs.in_memory_workdir_size }}g tmpfs $(pwd)
+        if: ${{ inputs.in_memory }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4.0.0
+        if: ${{ inputs.update_qemu }}
+
+      - run: |
+          REF_NAME=${REF_NAME##*/}
+          echo "LOCAL_PLATFORMS=$PLATFORMS" >> $GITHUB_OUTPUT
+        id: local_platforms
+        shell: bash
+        env:
+          PLATFORMS: ${{ inputs.platforms == '' && 'linux/amd64,linux/arm64' || inputs.platforms }}
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v6.0.2
+
+      - run: |
+          REF_NAME=${REF_NAME##*/}
+          echo "REF_NAME=$REF_NAME" >> $GITHUB_OUTPUT
+        id: ref_name
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+
+      # I tag dei repository ECR sono IMMUTABILI: ripushare un tag che c'e'
+      # gia' fa fallire il push (rerun di un run, race push/pull_request sullo
+      # stesso commit). Sondiamo quindi esattamente i tag che gli step di build
+      # qui sotto pusherebbero: se il tag identita' <branch>_<sha>-<arch> c'e'
+      # gia', quell'immagine e' per costruzione questo commit e la build di
+      # quella arch si salta. Un errore della sonda (registry irraggiungibile)
+      # vale "non esiste": si ricade nel comportamento di oggi.
+      - name: Probe pushed tags in registry
+        id: probe
+        shell: bash
+        env:
+          IMAGE: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}
+          PRIMARY: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          ALIAS: ${{ inputs.image_tag || format('{0}-{1}-{2}', github.sha, github.run_id, github.run_attempt) }}
+          PLATFORMS: ${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}
+        run: |
+          exists() { docker buildx imagetools inspect "$1" >/dev/null 2>&1; }
+
+          for platform in ${PLATFORMS//,/ }; do
+            arch="${platform##*/}"
+
+            if exists "$IMAGE:$PRIMARY-$arch"; then
+              echo "::notice title=Build $arch saltata::$IMAGE:$PRIMARY-$arch e' gia' nel registry"
+              echo "${arch}_exists=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${arch}_exists=false" >> "$GITHUB_OUTPUT"
+            fi
+
+            # I tag da pushare sono solo quelli che ancora non ci sono: pushare
+            # un tag immutabile gia' presente farebbe fallire l'intero step.
+            tags="$IMAGE:$PRIMARY-$arch"
+            if [ "$ALIAS" != "$PRIMARY" ]; then
+              if exists "$IMAGE:$ALIAS-$arch"; then
+                echo "::warning title=Tag gia' presente::$IMAGE:$ALIAS-$arch esiste gia' e i tag ECR sono immutabili: non verra' aggiornato"
+              else
+                tags="$tags"$'\n'"$IMAGE:$ALIAS-$arch"
+              fi
+            fi
+            {
+              echo "${arch}_tags<<TAGS_EOF"
+              echo "$tags"
+              echo "TAGS_EOF"
+            } >> "$GITHUB_OUTPUT"
+          done
+
+          # Anche il manifest multi-arch e' un tag immutabile.
+          if exists "$IMAGE:$PRIMARY"; then
+            echo "manifest_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "manifest_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$ALIAS" != "$PRIMARY" ] && exists "$IMAGE:$ALIAS"; then
+            echo "alias_manifest_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "alias_manifest_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Docker image for ARM
+        uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/arm64') && steps.probe.outputs.arm64_exists != 'true'
+        with:
+          platforms: linux/arm64
+          file: ${{ inputs.dockerfile }}
+          context: ${{ inputs.context }}
+          push: true
+          load: false
+          build-args: |
+            MVN_USER=${{ secrets.MVN_USER }}
+            MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
+            NODE_AUTH_TOKEN=${{ secrets.MVN_PASSWORD }}
+            IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
+            NX_CACHE_BUCKET=${{ inputs.nx_cache_bucket }}
+            NX_CACHE_PREFIX=${{ inputs.nx_cache_prefix != '' && inputs.nx_cache_prefix || inputs.image_name }}
+            NX_CACHE_PLUGIN=${{ inputs.nx_cache_plugin }}
+            ${{ inputs.build-args }}
+          labels: |
+            branch=${{ steps.ref_name.outputs.REF_NAME }}
+            sha=${{ github.sha }}
+          tags: ${{ steps.probe.outputs.arm64_tags }}
+          cache-from: |
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-arm64
+          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+
+
+      - name: Build Docker image for amd64
+        uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        if: contains(steps.local_platforms.outputs.LOCAL_PLATFORMS, 'linux/amd64') && steps.probe.outputs.amd64_exists != 'true'
+        with:
+          platforms: linux/amd64
+          file: ${{ inputs.dockerfile }}
+          context: ${{ inputs.context }}
+          push: true
+          load: false
+          build-args: |
+            MVN_USER=${{ secrets.MVN_USER }}
+            MVN_PASSWORD=${{ secrets.MVN_PASSWORD }}
+            NODE_AUTH_TOKEN=${{ secrets.MVN_PASSWORD }}
+            IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
+            NX_CACHE_BUCKET=${{ inputs.nx_cache_bucket }}
+            NX_CACHE_PREFIX=${{ inputs.nx_cache_prefix != '' && inputs.nx_cache_prefix || inputs.image_name }}
+            NX_CACHE_PLUGIN=${{ inputs.nx_cache_plugin }}
+            ${{ inputs.build-args }}
+          labels: |
+            branch=${{ steps.ref_name.outputs.REF_NAME }}
+            sha=${{ github.sha }}
+          tags: ${{ steps.probe.outputs.amd64_tags }}
+          cache-from: |
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-arm64
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-amd64
+            type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:develop-arm64
+          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ steps.ref_name.outputs.REF_NAME }}-amd64
+
+      # Se una build e' stata saltata, il suo alias (image_tag oppure
+      # <sha>-<run_id>-<attempt>) non e' stato pushato da nessuno: lo si crea
+      # lato registry dal tag identita', senza ricostruire niente.
+      - name: Re-tag existing images (no rebuild)
+        shell: bash
+        env:
+          IMAGE: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}
+          PRIMARY: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          ALIAS: ${{ inputs.image_tag || format('{0}-{1}-{2}', github.sha, github.run_id, github.run_attempt) }}
+          PLATFORMS: ${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}
+        run: |
+          if [ "$ALIAS" = "$PRIMARY" ]; then
+            exit 0
+          fi
+          for platform in ${PLATFORMS//,/ }; do
+            arch="${platform##*/}"
+            if docker buildx imagetools inspect "$IMAGE:$ALIAS-$arch" >/dev/null 2>&1; then
+              continue
+            fi
+            docker buildx imagetools create --tag "$IMAGE:$ALIAS-$arch" "$IMAGE:$PRIMARY-$arch"
+          done
+
+      - name: Create combined multi-platform image
+        if: steps.probe.outputs.manifest_exists != 'true'
+        run: |
+          platforms="${{ steps.local_platforms.outputs.LOCAL_PLATFORMS }}"
+          tags=""
+          for platform in ${platforms//,/ }
+          do
+            tag="${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}-${platform##*/}"
+            tags="$tags $tag"
+          done
+          docker buildx imagetools create --tag ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }} $tags
+  
+      - name: Log build to loki
+        shell: bash
+        run: |
+          epoch_time=$(date +%s)
+          json_payload=$(cat <<EOF
+          {
+            "streams": [
+              {
+                "stream": {
+                  "job": "ci",
+                  "REPOSITORY": "${{ github.repository }}",
+                  "BRANCH": "${{ github.ref_name }}"
+                },
+                "values": [
+                  [
+                    "${epoch_time}000000000",
+                    "${{ github.repository }}:${{ github.ref_name }}:${{ github.sha }} build completed"
+                  ]
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+          
+          # Send POST request
+          curl -X POST -H "Content-Type: application/json" -d "${json_payload}" "http://logging.awms.io:3100/loki/api/v1/push"
+
+      - name: Infra token (dispatch)
+        id: infra_token_dispatch
+        if: ${{ inputs.trigger_infra }}
+        uses: i40awms/actions/.github/actions/infra-token@develop
+        with:
+          secret: ${{ secrets.INFRA_TOKEN }}
+
+      # workflow_dispatch, non repository_dispatch: basta Actions write su infra,
+      # mentre repository_dispatch vorrebbe Contents write su un develop non protetto.
+      - name: Trigger INFRA
+        if: ${{ inputs.trigger_infra }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.infra_token_dispatch.outputs.token }}
+          PROJECT_REF: ${{ github.repository }}
+          IMAGE_REF: ${{ steps.ref_name.outputs.REF_NAME }}_${{ github.sha }}
+          BRANCH_REF: ${{ github.ref_name }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/i40awms/infra/actions/workflows/trigger.yml/dispatches \
+            -d "{\"ref\":\"develop\",\"inputs\":{\"PROJECT_REF\":\"${PROJECT_REF}\",\"IMAGE_REF\":\"${IMAGE_REF}\",\"BRANCH_REF\":\"${BRANCH_REF}\"}}"

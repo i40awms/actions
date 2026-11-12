@@ -1,0 +1,111 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Build
+
+# Controls when the workflow will run
+on:
+  workflow_call:
+    inputs:
+      cache_key:
+        description: "Cache key"
+        required: true
+        type: string
+      image_name:
+        description: "Repository short name"
+        required: true
+        type: string
+      image_tag:
+        description: "Image tag"
+        required: true
+        type: string
+      in_memory:
+        description: "Use in-memory docker"
+        required: false
+        type: boolean
+        default: false
+      subfolder:
+        description: "Subfolder to build"
+        required: true
+        type: string
+      dockerfile:
+        description: "Subfolder to build"
+        required: false
+        type: string
+        default: dockerfile
+      platforms:
+        description: "Platforms to build"
+        required: false
+        type: string
+        default: linux/amd64,linux/arm64
+      update_qemu:
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      IMG_REGISTRY:
+        required: true
+      IMG_REGION:
+        required: true
+      CACHE_BUCKET:
+        required: true
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: [self-hosted, linux]
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: Run Docker on tmpfs
+        uses: JonasAlfredsson/docker-on-tmpfs@v1
+        if: ${{ inputs.in_memory }}
+        with:
+          tmpfs_size: 2
+          swap_size: 4
+          swap_location: "/mnt/swapfile"
+
+      - name: mount current folder in RAM
+        run: sudo mount -t tmpfs -o size=1g tmpfs $(pwd)
+        if: ${{ inputs.in_memory }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4.0.0
+        if: ${{ inputs.update_qemu }}
+
+      # I tag dei repository ECR sono IMMUTABILI: ripushare un tag che c'e'
+      # gia' fa fallire il push. Sondiamo esattamente il tag che lo step di
+      # build qui sotto pusherebbe. Un errore della sonda vale "non esiste".
+      - name: Probe pushed tag in registry
+        id: probe
+        shell: bash
+        env:
+          REF: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
+        run: |
+          if docker buildx imagetools inspect "$REF" >/dev/null 2>&1; then
+            echo "::notice title=Build saltata::$REF e' gia' nel registry"
+            echo "image_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v6.0.2
+
+      - name: Build and push
+        if: steps.probe.outputs.image_exists != 'true'
+        uses: docker/build-push-action@v7.1.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          file: ./${{ inputs.subfolder }}/${{ inputs.dockerfile }}
+          context: ${{ inputs.subfolder }}
+          push: true
+          tags: ${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
+          cache-from: type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ inputs.cache_key }}
+          cache-to: mode=max,image-manifest=true,oci-mediatypes=true,type=registry,ref=${{ secrets.IMG_REGISTRY }}/${{ inputs.image_name }}-cache:${{ inputs.cache_key }}
+          platforms: ${{ inputs.platforms }}
+          build-args: |
+            IMG_REGISTRY=${{ secrets.IMG_REGISTRY }}
